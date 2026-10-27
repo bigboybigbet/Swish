@@ -1,0 +1,16 @@
+name: Model idea
+description: Propose a feature, rating system or algorithm for the prediction model
+labels: [model]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What the model should do differently, and why it should predict better.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Benchmark output from `python -m research.benchmark` (holdout log loss and paired difference vs. the reference), or a source.

@@ -1,0 +1,21 @@
+name: Bug report
+description: Something is broken or gives wrong numbers
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got. Paste the full error if there is one.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      placeholder: e.g. a1b2c3d
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version, and `pip freeze | grep -iE "pandas|xgboost|scikit|nba_api"`
