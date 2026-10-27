@@ -7,3 +7,5 @@ joblib
 matplotlib
 nba_api
 requests
+optuna
+shap

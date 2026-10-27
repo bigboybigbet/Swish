@@ -22,8 +22,8 @@ from config import (
     MODEL_FILE, OPTUNA_PARAMS_FILE, PLAYER_IMPACT_FILE,
 )
 import data.cache as cache
-from data.autobacktest import log_stats as ab_log_stats, run_auto_backtest
-from data.elo import load_elo, save_elo, update_elo
+from data.autobacktest import (AUTOBACKTEST_CSV, log_stats as ab_log_stats,
+                               run_auto_backtest)
 from data.injuries import (
     apply_injury_adjustment, calc_strength_factor,
     get_injury_report, load_player_impact, load_player_impact_meta,
@@ -32,7 +32,9 @@ from data.odds import fetch_odds_api, fetch_odds_espn
 from data.schedule import fail_reason, get_past_results_espn, get_schedule_by_date
 from engine.betting import american_to_decimal, kelly_criterion
 from engine.features import get_team_advanced_stats
-from engine.models import build_master_dataset, predict_hybrid, train_model
+from engine.models import (build_master_dataset, build_matchup_row,
+                           get_calibrator, predict_hybrid, train_model,
+                           unwrap_xgb)
 from engine.simulate import run_monte_carlo, run_poisson_model
 
 # ── optional deps ─────────────────────────────────────────────────────────────
@@ -282,27 +284,23 @@ def fig_shap_chart(model, hd, ad):
     if not SHAP_AVAILABLE:
         return None
     try:
-        def _row(s, is_home):
-            return pd.DataFrame([[
-                is_home, s["PLUS_MINUS"], s["PTS"], s["REB"],
-                s["eFG_PCT"], s["AST_TOV"], s["TS_PCT"],
-                s["WIN_STREAK"], s["OREB_PCT"], s["DAYS_REST"], s["IS_B2B"],
-            ]], columns=FEATURE_COLS)
-        explainer = shap.TreeExplainer(model)
-        h_sv = explainer.shap_values(_row(hd, 1))[0]
-        a_sv = explainer.shap_values(_row(ad, 0))[0]
-        fig, axes = plt.subplots(1, 2, figsize=(11, 3.5))
+        explainer = shap.TreeExplainer(unwrap_xgb(model))
+        sv  = explainer.shap_values(build_matchup_row(hd, ad))[0]
+        idx = np.argsort(np.abs(sv))
+        labels = [FEATURE_COLS[i] for i in idx]
+        values = [sv[i] for i in idx]
+        fig, ax = plt.subplots(figsize=(9, 4.5))
         fig.patch.set_facecolor(DARK_BG)
-        for ax, sv, title in zip(axes, [h_sv, a_sv],
-                                  [hd["name"].split()[-1], ad["name"].split()[-1]]):
-            ax.set_facecolor(CARD_BG)
-            cols = [ORANGE if v > 0 else RED for v in sv]
-            ax.barh(FEATURE_COLS, sv, color=cols, edgecolor="none", height=0.6)
-            ax.axvline(0, color="white", lw=0.8, ls="--")
-            ax.set_title(f"SHAP — {title}", color="white", fontsize=10, fontweight="bold")
-            ax.tick_params(colors="#94a3b8", labelsize=8)
-            for sp in ax.spines.values():
-                sp.set_visible(False)
+        ax.set_facecolor(CARD_BG)
+        cols = [ORANGE if v > 0 else PURPLE for v in values]
+        ax.barh(labels, values, color=cols, edgecolor="none", height=0.6)
+        ax.axvline(0, color="white", lw=0.8, ls="--")
+        ax.set_title(
+            f"SHAP — ← favors {ad['name'].split()[-1]}  |  favors {hd['name'].split()[-1]} →",
+            color="white", fontsize=10, fontweight="bold")
+        ax.tick_params(colors="#94a3b8", labelsize=8)
+        for sp in ax.spines.values():
+            sp.set_visible(False)
         fig.tight_layout(pad=1.0)
         return fig
     except Exception:
@@ -386,6 +384,59 @@ def fig_poisson_bars(pr, ht, at):
     return fig
 
 
+def fig_history_chart(df: pd.DataFrame):
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.5))
+    fig.patch.set_facecolor(DARK_BG)
+    for ax in axes:
+        ax.set_facecolor(CARD_BG)
+
+    # Rolling 20-game accuracy
+    roll = df["CORRECT"].rolling(20, min_periods=5).mean() * 100
+    col  = ORANGE if roll.iloc[-1] >= 52.4 else RED
+    axes[0].plot(range(len(roll)), roll, color=col, lw=2)
+    axes[0].axhline(52.4, color=GRAY,  ls="--", lw=1, label="Break-even 52.4%")
+    axes[0].axhline(55.0, color=GREEN, ls=":",  lw=1, label="Good 55%")
+    axes[0].set_ylim(30, 80)
+    axes[0].set_title("Rolling Accuracy (20 games)", color="white",
+                       fontsize=11, fontweight="bold")
+    axes[0].set_ylabel("%", color="#94a3b8", fontsize=8)
+    axes[0].tick_params(colors="#94a3b8", labelsize=8)
+    axes[0].legend(frameon=False, labelcolor="white", fontsize=8)
+    for sp in axes[0].spines.values():
+        sp.set_visible(False)
+
+    # Accuracy by confidence tier
+    tiers  = [(0.50, 0.55, "50-55%"), (0.55, 0.60, "55-60%"),
+              (0.60, 0.65, "60-65%"), (0.65, 0.70, "65-70%"),
+              (0.70, 0.75, "70-75%"), (0.75, 1.01, "75%+")]
+    names, accs, ns = [], [], []
+    for lo, hi, label in tiers:
+        mask = (df["CONFIDENCE"] >= lo) & (df["CONFIDENCE"] < hi)
+        if mask.sum() > 0:
+            names.append(label)
+            accs.append(df.loc[mask, "CORRECT"].mean() * 100)
+            ns.append(mask.sum())
+    if names:
+        colors = [ORANGE if a >= 52.4 else RED for a in accs]
+        xs = range(len(names))
+        axes[1].bar(xs, accs, color=colors, alpha=0.85, edgecolor="none")
+        axes[1].axhline(52.4, color=GRAY, ls="--", lw=1)
+        for i, (a, n) in enumerate(zip(accs, ns)):
+            axes[1].text(i, a + 0.8, f"n={n}", ha="center",
+                         color="#94a3b8", fontsize=7)
+        axes[1].set_xticks(list(xs))
+        axes[1].set_xticklabels(names, rotation=25, color="#94a3b8", fontsize=7)
+    axes[1].set_title("Accuracy by Confidence Tier", color="white",
+                       fontsize=11, fontweight="bold")
+    axes[1].set_ylabel("Accuracy %", color="#94a3b8", fontsize=8)
+    axes[1].tick_params(colors="#94a3b8", labelsize=8)
+    for sp in axes[1].spines.values():
+        sp.set_visible(False)
+
+    fig.tight_layout(pad=1.2)
+    return fig
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
@@ -449,19 +500,33 @@ with st.sidebar:
                 st.success(
                     f"✅ {_ab_result['new']} new games · "
                     f"{_ab_result['correct']}/{_ab_result['new']} correct "
-                    f"({_ab_result['acc'] * 100:.1f}%) · "
-                    f"{_ab_result['lessons']} lessons added"
+                    f"({_ab_result['acc'] * 100:.1f}%)"
                 )
-                if _ab_result["metrics"]:
-                    m = _ab_result["metrics"]
+                if _ab_result.get("calibrator"):
+                    _cal = _ab_result["calibrator"]
+                    _cw  = _cal["weights"]
                     st.caption(
-                        f"Retrained — Val Acc: **{m['val_acc']:.1%}** | "
-                        f"Loss: **{m['val_loss']:.4f}**"
+                        f"Blend calibrator updated — "
+                        f"{_cal['n_updates']} total observations · "
+                        f"XGB: **{_cw['XGBoost']:.3f}** · "
+                        f"MC: **{_cw['Monte Carlo']:.3f}** · "
+                        f"ELO: **{_cw['ELO diff']:.3f}**"
                     )
-                    st.session_state.update({
-                        "xgb_model": _ab_model, "model_metrics": m,
-                        "feat_imp": m["feat_imp"],
-                    })
+    st.divider()
+
+    # ── Blend calibrator ─────────────────────────────────────────────────
+    st.markdown("#### 🎛️ Blend Calibrator (live weights)")
+    _bc = get_calibrator()
+    _bs = _bc.summary()
+    _bw = _bs["weights"]
+    st.caption(
+        f"Observations: **{_bs['n_updates']}**  |  bias: `{_bs['bias']:.3f}`"
+    )
+    _bc_cols = st.columns(3)
+    _bc_cols[0].metric("XGBoost",     f"{_bw['XGBoost']:.3f}")
+    _bc_cols[1].metric("Monte Carlo", f"{_bw['Monte Carlo']:.3f}")
+    _bc_cols[2].metric("ELO diff",    f"{_bw['ELO diff']:.3f}")
+    st.caption("Weights update automatically via gradient descent after each backtest.")
     st.divider()
 
     # ── Feature importance ────────────────────────────────────────────────
@@ -510,7 +575,7 @@ with st.sidebar:
         st.success("Cache cleared.")
     st.divider()
 
-    st.caption("NBA Stats API + ESPN · 2 Seasons · 50k Sims · Auto-Backtest")
+    st.caption("NBA Stats API + ESPN · 3 Seasons · Matchup Features · 50k Correlated Sims · MOV-Elo")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEADER + TABS
@@ -576,16 +641,16 @@ with tab1:
     with right:
         st.markdown("""
         <div class='score-card' style='margin-top:8px'>
-            <div style='color:#94a3b8;font-size:.7rem;letter-spacing:2px;margin-bottom:8px'>ENGINE STACK v4</div>
+            <div style='color:#94a3b8;font-size:.7rem;letter-spacing:2px;margin-bottom:8px'>ENGINE STACK v5 · MATCHUP</div>
             <div style='text-align:left;font-size:.82rem;color:#cbd5e1;line-height:1.9'>
-                🧠 <b>XGBoost</b> — 11 features + Optuna HPO<br>
-                🎲 <b>Monte Carlo</b> — 50,000 simulations<br>
-                🎯 <b>Poisson</b> — Quarter-by-quarter model<br>
-                🏅 <b>Elo ratings</b> — Dynamic team power<br>
+                🧠 <b>XGBoost matchup model</b> — Home-vs-away differentials<br>
+                📊 <b>Four Factors + pace</b> — Multi-window form (5/10/15)<br>
+                📐 <b>Platt calibration</b> — True probability output<br>
+                🎛️ <b>BlendCalibrator</b> — Online gradient descent blend<br>
+                🎲 <b>Correlated Monte Carlo</b> — 50,000 paired sims<br>
+                🏅 <b>MOV-Elo</b> — Margin-aware, home-adjusted, auto-updating<br>
                 🩹 <b>Injury system</b> — Live ESPN + impact data<br>
-                💰 <b>Kelly Criterion</b> — Optimal bet sizing<br>
-                🔍 <b>SHAP</b> — Model explainability<br>
-                💾 <b>SQLite cache</b> — Fast repeated lookups
+                💰 <b>Kelly Criterion</b> — Optimal bet sizing
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -844,38 +909,40 @@ with tab2:
                     st.warning("Could not compute predictions.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — BACKTEST
+# TAB 3 — BACKTEST  (live ESPN results × current model, read-only)
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
-    st.info("Replay historical dates to measure accuracy. Wrong predictions are re-weighted and the model self-updates.")
+    st.info("Replay any historical date range against the current model. No data is modified — use the sidebar auto-backtest for online learning.")
     bt_col, _ = st.columns([1.2, 1])
     with bt_col:
         date_range = st.date_input(
             "🗓️ Backtest range",
-            [datetime.today() - timedelta(days=3), datetime.today() - timedelta(days=1)],
+            [datetime.today() - timedelta(days=7), datetime.today() - timedelta(days=1)],
         )
-    bt_btn = st.button("🚀 RUN BACKTEST & SELF-LEARN", type="primary", use_container_width=True)
+    bt_btn = st.button("🚀 RUN BACKTEST", type="primary", use_container_width=True)
 
     if bt_btn:
         if len(date_range) != 2:
-            st.error("Select valid start and end dates.")
+            st.error("Select both a start and end date.")
         elif not os.path.exists(MODEL_FILE):
-            st.error("⚠️ Train model first.")
+            st.error("⚠️ Train the model first.")
         else:
-            model = load(MODEL_FILE)
-            sd, ed = date_range
-            all_eval, new_lessons = [], []
+            model      = load(MODEL_FILE)
+            sd, ed     = date_range
+            all_eval   = []
             tg = tc = hcg = hcc = 0
             pb         = st.progress(0)
             days_total = (ed - sd).days + 1
             cd, dc     = sd, 0
 
-            with st.spinner("🕰️ Running time-machine backtest…"):
+            with st.spinner("🕰️ Fetching results from ESPN and running predictions…"):
                 while cd <= ed:
                     for game in get_past_results_espn(cd):
-                        hn, an, act = game["Home Team"], game["Away Team"], game["Actual_Winner"]
-                        hd = get_team_advanced_stats(hn, target_date=cd)
-                        ad = get_team_advanced_stats(an, target_date=cd)
+                        hn  = game["Home Team"]
+                        an  = game["Away Team"]
+                        act = game["Actual_Winner"]
+                        hd  = get_team_advanced_stats(hn, target_date=cd)
+                        ad  = get_team_advanced_stats(an, target_date=cd)
                         if hd and ad:
                             fp, spread, total, xp, mp, cfl, mc_full, hf, af = \
                                 predict_hybrid(hd, ad, model)
@@ -889,21 +956,6 @@ with tab3:
                                 hcg += 1
                                 if ok:
                                     hcc += 1
-                            if not ok:
-                                for ih, stats, res in [(1, hd, act), (0, ad, 1 - act)]:
-                                    new_lessons.append({
-                                        "GAME_DATE": cd.strftime("%Y-%m-%d"), "TEAM_ID": 0,
-                                        "IS_HOME": ih, "PLUS_MINUS": stats["PLUS_MINUS"],
-                                        "PTS": stats["PTS"], "REB": stats["REB"],
-                                        "eFG_PCT": stats["eFG_PCT"], "AST_TOV": stats["AST_TOV"],
-                                        "TS_PCT": stats["TS_PCT"], "WIN_STREAK": stats["WIN_STREAK"],
-                                        "OREB_PCT": stats["OREB_PCT"], "DAYS_REST": stats["DAYS_REST"],
-                                        "IS_B2B": stats["IS_B2B"], "RESULT": res,
-                                    })
-                            elo_d = load_elo()
-                            w = hn if act == 1 else an
-                            l = an if act == 1 else hn
-                            save_elo(update_elo(w, l, elo_d))
                             all_eval.append({
                                 "Date":    cd.strftime("%d/%m"),
                                 "Matchup": f"{hn} vs {an}",
@@ -919,28 +971,18 @@ with tab3:
                     cd += timedelta(days=1)
 
             if tg > 0:
-                st.markdown("### 📊 Backtest Performance Report")
+                st.markdown("### 📊 Backtest Report")
                 r1, r2, r3, r4 = st.columns(4)
-                r1.metric("Games",       f"{tg}")
-                r2.metric("Overall Acc.", f"{tc / tg * 100:.1f}%", delta=f"+{tc} correct")
-                r3.metric("VIP Acc.",    f"{hcc / hcg * 100:.1f}%" if hcg > 0 else "N/A",
-                          delta=f"{hcg} VIP" if hcg > 0 else "")
-                r4.metric("Wrong",       f"{tg - tc}", delta=f"{len(new_lessons) // 2} lessons")
+                r1.metric("Games",        f"{tg}")
+                r2.metric("Overall Acc.", f"{tc / tg * 100:.1f}%",
+                          delta=f"+{tc} correct")
+                r3.metric("VIP Acc. (≥65%)",
+                          f"{hcc / hcg * 100:.1f}%" if hcg > 0 else "N/A",
+                          delta=f"{hcg} VIP games" if hcg > 0 else "")
+                r4.metric("Wrong", f"{tg - tc}")
                 st.dataframe(pd.DataFrame(all_eval), hide_index=True, use_container_width=True)
-
-                if new_lessons and os.path.exists(DATASET_FILE):
-                    st.markdown("---")
-                    st.warning(f"⚠️ {len(new_lessons) // 2} wrong predictions → retraining…")
-                    master  = pd.read_csv(DATASET_FILE)
-                    lessons = pd.DataFrame(new_lessons)
-                    updated = pd.concat([master, lessons, lessons, lessons], ignore_index=True)
-                    updated.to_csv(DATASET_FILE, index=False)
-                    with st.spinner("🧬 Self-learning…"):
-                        _, cnt, nm = train_model(force_rebuild=False)
-                    if nm:
-                        st.success(f"🧬 EVOLUTION COMPLETE — {cnt:,} samples · Val acc: **{nm['val_acc']:.1%}**")
             else:
-                st.warning("No completed results found in this date range.")
+                st.warning("No completed game results found for this date range.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — ROI DASHBOARD
