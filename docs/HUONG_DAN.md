@@ -1,6 +1,6 @@
-# Hướng dẫn sử dụng NBA Quant
+# Hướng dẫn sử dụng Swish
 
-NBA Quant dự đoán từng trận NBA trước giờ bóng lăn: xác suất thắng của đội nhà, chênh lệch điểm kỳ vọng (spread) và tổng điểm (total). App chạy trên máy bạn dưới dạng web app, mở bằng trình duyệt.
+Swish dự đoán từng trận NBA trước giờ bóng lăn: xác suất thắng của đội nhà, chênh lệch điểm kỳ vọng (spread) và tổng điểm (total). App chạy trên máy bạn dưới dạng web app, mở bằng trình duyệt.
 
 ## Model hiện tại
 

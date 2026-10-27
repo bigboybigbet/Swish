@@ -36,7 +36,7 @@ export async function request(method, path, { params, body, signal } = {}) {
     res = await fetch(buildUrl(path, params), init);
   } catch (e) {
     if (e.name === 'AbortError') throw e;
-    throw new ApiError(0, { error: 'network', detail: 'Cannot reach the NBA Quant server. Is it still running?' });
+    throw new ApiError(0, { error: 'network', detail: 'Cannot reach the Swish server. Is it still running?' });
   }
   const text = await res.text();
   let data = null;
