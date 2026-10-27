@@ -34,10 +34,12 @@ NAME = "player_rapm"
 FEATURES = ["RP_DIFF"]
 BOX_CACHE = os.path.join(CACHE_DIR, "player_rapm_box.parquet")
 SIGNAL_FILE = os.path.join(CACHE_DIR, "signals", f"{NAME}.csv")
+VERSION = 3                    # bump when the engine output changes (cache key)
 
 _BOX_COLS = {
-    "points": "PTS", "threePointersMade": "FG3M",
-    "fieldGoalsAttempted": "FGA", "freeThrowsAttempted": "FTA",
+    "points": "PTS", "fieldGoalsMade": "FGM", "fieldGoalsAttempted": "FGA",
+    "threePointersMade": "FG3M", "threePointersAttempted": "FG3A",
+    "freeThrowsMade": "FTM", "freeThrowsAttempted": "FTA",
     "reboundsOffensive": "OREB", "reboundsDefensive": "DREB",
     "assists": "AST", "steals": "STL", "blocks": "BLK", "turnovers": "TOV",
     "foulsPersonal": "PF", "plusMinusPoints": "PM",
@@ -118,7 +120,8 @@ def build_dataset(raw: pd.DataFrame, use_cache: bool = True, **params) -> pd.Dat
     """One row per game with the pre-game RAPM state (cached per parameter
     set under research/cache/)."""
     p = {**PARAMS, **params}
-    key = hashlib.md5(json.dumps([p, len(raw)], sort_keys=True).encode()).hexdigest()[:10]
+    key = hashlib.md5(json.dumps([p, len(raw), VERSION], sort_keys=True)
+                      .encode()).hexdigest()[:10]
     path = os.path.join(CACHE_DIR, f"player_rapm_{key}.parquet")
     if use_cache and os.path.exists(path):
         return pd.read_parquet(path)

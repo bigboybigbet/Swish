@@ -1,0 +1,185 @@
+{#- Shared page metadata and components.
+    Components emit Alpine-bound markup: arguments ending in `expr` are
+    JavaScript expressions evaluated inside the caller's x-data scope.
+    Use: {% from "_macros.html" import stat_tile, empty_state %}            -#}
+
+{#- Nav order and page metadata (pages.py has the same keys/paths). -#}
+{%- set PAGES = [
+  {"key": "slate",    "href": "/",         "label": "Slate",    "icon": "calendar-event",
+   "about": "Today's games with win probabilities, spreads, totals and value spots."},
+  {"key": "game",     "href": "/game",     "label": "Game",     "icon": "vs",
+   "about": "One matchup in depth: win probability, why the model says so, score ranges and injuries."},
+  {"key": "ratings",  "href": "/ratings",  "label": "Ratings",  "icon": "trophy",
+   "about": "Team power ratings with injury-adjusted strength, plus player ratings."},
+  {"key": "accuracy", "href": "/accuracy", "label": "Accuracy", "icon": "target",
+   "about": "How good the forecasts have been: calibration, Brier, log loss and range backtests."},
+  {"key": "bets",     "href": "/bets",     "label": "Bets",     "icon": "coins",
+   "about": "Log bets and track win rate, profit and ROI."},
+  {"key": "model",    "href": "/model",    "label": "Model",    "icon": "cpu",
+   "about": "Train or reload the model, update player impact and inspect what the model learned."},
+  {"key": "settings", "href": "/settings", "label": "Settings", "icon": "settings",
+   "about": "API keys, thresholds, stake sizing and data management."},
+] -%}
+
+{% macro page_label(page) -%}
+{%- for p in PAGES if p.key == page %}{{ p.label }}{% else %}NBA Quant{% endfor -%}
+{%- endmacro %}
+
+{#- Tabler page header; optional actions via {% call page_header(...) %}…{% endcall %} -#}
+{% macro page_header(title, pretitle="NBA Quant") -%}
+<div class="page-header d-print-none">
+  <div class="container-xl">
+    <div class="row g-2 align-items-center">
+      <div class="col">
+        <div class="page-pretitle">{{ pretitle }}</div>
+        <h1 class="page-title">{{ title }}</h1>
+      </div>
+      {%- if caller is defined %}
+      <div class="col-auto ms-auto d-print-none">{{ caller() }}</div>
+      {%- endif %}
+    </div>
+  </div>
+</div>
+{%- endmacro %}
+
+{#- Tabler .empty; optional action buttons via call block. -#}
+{% macro empty_state(icon, title, subtitle="") -%}
+<div class="empty">
+  <div class="empty-icon"><i class="ti ti-{{ icon }}" aria-hidden="true"></i></div>
+  <p class="empty-title">{{ title }}</p>
+  {%- if subtitle %}
+  <p class="empty-subtitle text-secondary">{{ subtitle }}</p>
+  {%- endif %}
+  {%- if caller is defined %}
+  <div class="empty-action">{{ caller() }}</div>
+  {%- endif %}
+</div>
+{%- endmacro %}
+
+{#- Error alert with a Retry button. -#}
+{% macro error_state(message_expr, retry_expr) -%}
+<div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
+  <i class="ti ti-alert-triangle fs-2" aria-hidden="true"></i>
+  <div class="flex-fill" x-text="{{ message_expr }}"></div>
+  <button type="button" class="btn btn-sm btn-outline-danger" @click="{{ retry_expr }}">
+    <i class="ti ti-refresh me-1" aria-hidden="true"></i>Retry
+  </button>
+</div>
+{%- endmacro %}
+
+{#- Loading placeholders. -#}
+{% macro skeleton(n=6, cols="col-12 col-md-6 col-xl-4") -%}
+<div class="row row-cards" aria-hidden="true">
+  {%- for i in range(n) %}
+  <div class="{{ cols }}">
+    <div class="card placeholder-glow">
+      <div class="card-body">
+        <div class="placeholder col-9 mb-3"></div>
+        <div class="placeholder col-7 mb-2"></div>
+        <div class="placeholder placeholder-xs col-12 mb-2"></div>
+        <div class="placeholder col-5"></div>
+      </div>
+    </div>
+  </div>
+  {%- endfor %}
+</div>
+{%- endmacro %}
+
+{% macro skeleton_rows(n=8) -%}
+<div class="placeholder-glow" aria-hidden="true">
+  {%- for i in range(n) %}
+  <div class="placeholder col-12 mb-2"></div>
+  {%- endfor %}
+</div>
+{%- endmacro %}
+
+{#- Header help icon; text from web/static/data/glossary.json. -#}
+{% macro glossary_tip(key) -%}
+<i class="ti ti-info-circle glossary-tip ms-1" tabindex="0" role="img" x-data
+   :title="$store.glossary.text('{{ key }}')" :aria-label="$store.glossary.text('{{ key }}')"></i>
+{%- endmacro %}
+
+{#- Label, big value and a sub-line. -#}
+{% macro stat_tile(label, value_expr, sub_expr=None, glossary=None) -%}
+<div class="card card-sm stat-tile">
+  <div class="card-body">
+    <div class="subheader">{{ label }}{% if glossary %}{{ glossary_tip(glossary) }}{% endif %}</div>
+    <div class="h2 mb-0 num" x-text="{{ value_expr }}">–</div>
+    {%- if sub_expr %}
+    <div class="text-secondary small" x-text="{{ sub_expr }}"></div>
+    {%- endif %}
+  </div>
+</div>
+{%- endmacro %}
+
+{#- Coloured circle with the abbreviation. team_expr → {id, abbr, name, colors?}. -#}
+{% macro team_badge(team_expr, size="") -%}
+<span class="team-badge {{ size }}" :style="$teamStyle({{ team_expr }})"
+      x-text="({{ team_expr }})?.abbr || ''" :title="({{ team_expr }})?.name || ''"></span>
+{%- endmacro %}
+
+{#- Two-colour split bar, away on the left, home on the right. -#}
+{% macro prob_split_bar(home_expr, away_expr, p_home_expr) -%}
+<div class="progress prob-split" role="img"
+     :aria-label="`${({{ away_expr }})?.abbr} ${$fmt.pct(1 - ({{ p_home_expr }}))}, ${({{ home_expr }})?.abbr} ${$fmt.pct({{ p_home_expr }})}`">
+  <div class="progress-bar"
+       :style="{width: ((1 - ({{ p_home_expr }})) * 100) + '%', backgroundColor: $teamColors({{ home_expr }}, {{ away_expr }}).away}"></div>
+  <div class="progress-bar"
+       :style="{width: (({{ p_home_expr }}) * 100) + '%', backgroundColor: $teamColors({{ home_expr }}, {{ away_expr }}).home}"></div>
+</div>
+{%- endmacro %}
+
+{#- Low / Medium / High from a tier string. -#}
+{% macro confidence_badge(tier_expr) -%}
+<span class="badge" x-show="{{ tier_expr }}"
+      :class="{high: 'bg-green-lt', medium: 'bg-yellow-lt', low: 'bg-secondary-lt'}[{{ tier_expr }}]"
+      x-text="{high: 'High', medium: 'Medium', low: 'Low'}[{{ tier_expr }}]"></span>
+{%- endmacro %}
+
+{#- Green "+4.3% edge" (optionally prefixed, e.g. "Value: GSW"). Hidden when edge ≤ 0. -#}
+{% macro edge_badge(edge_expr, prefix_expr="''") -%}
+<span class="badge bg-green-lt" x-show="({{ edge_expr }}) > 0">
+  <i class="ti ti-trending-up" aria-hidden="true"></i>
+  <span x-text="(({{ prefix_expr }}) ? ({{ prefix_expr }}) + ' ' : '') + $fmt.signed(({{ edge_expr }}) * 100, 1) + '% edge'"></span>
+</span>
+{%- endmacro %}
+
+{#- Status dot plus "3 min ago". -#}
+{% macro freshness(as_of_expr, stale_expr="false", label="") -%}
+<span class="d-inline-flex align-items-center gap-1 small text-secondary">
+  <span class="status-dot" :class="({{ stale_expr }}) ? 'status-yellow' : 'status-green'"></span>
+  {%- if label %}<span>{{ label }}</span>{% endif %}
+  <span x-text="$fmt.ago({{ as_of_expr }})"></span>
+</span>
+{%- endmacro %}
+
+{#- Confirmation dialog. Open with data-bs-toggle="modal" data-bs-target="#id";
+    body via call block; confirm_expr runs on the confirm button. -#}
+{% macro confirm_modal(id, title, confirm_label, confirm_expr, danger=True) -%}
+<div class="modal modal-blur fade" id="{{ id }}" tabindex="-1" aria-labelledby="{{ id }}-title" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      {%- if danger %}<div class="modal-status bg-danger"></div>{% endif %}
+      <div class="modal-body text-center py-4">
+        <i class="ti ti-alert-triangle mb-2 fs-1 {{ 'text-danger' if danger else 'text-warning' }}" aria-hidden="true"></i>
+        <h3 id="{{ id }}-title">{{ title }}</h3>
+        {%- if caller is defined %}
+        <div class="text-secondary">{{ caller() }}</div>
+        {%- endif %}
+      </div>
+      <div class="modal-footer">
+        <div class="w-100">
+          <div class="row">
+            <div class="col"><button type="button" class="btn w-100" data-bs-dismiss="modal">Cancel</button></div>
+            <div class="col">
+              <button type="button" class="btn {{ 'btn-danger' if danger else 'btn-primary' }} w-100"
+                      data-bs-dismiss="modal" @click="{{ confirm_expr }}">{{ confirm_label }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{%- endmacro %}

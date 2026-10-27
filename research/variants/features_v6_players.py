@@ -2,20 +2,25 @@
 Roster-availability feature for features_v6, from player box scores.
 
 For every team game:  AVAIL = sum_i v_i * (a_i - s_i)  over the team's players
-this season, where
+this season and last season, where
   a_i  1 if player i is available tonight: dressed and either played or was a
        coach's-decision DNP (game-state independent, i.e. the pre-game active
-       list; injured / rest / not-with-team / not listed count as out),
+       list; injured / rest / not-with-team / not listed / departed = out),
   s_i  share of the team's earlier games this season he was available for,
-  v_i  his pre-game value: per-game Game Score (Hollinger) over his earlier
-       games, exponentially weighted and shrunk toward a bench-level prior.
-So AVAIL is how much stronger tonight's available roster is than the average
-roster behind the team's season-to-date rating (negative = key players out,
-positive = stars back / newly acquired).  Only earlier games feed v_i and s_i.
+       shrunk toward his share last season with k pseudo-games (the same
+       prior weight as the shrunk team rating),
+  v_i  his pre-game value: per-game Game Score (Hollinger), minus a
+       replacement level per minute (applied by the caller), exponentially
+       weighted over his earlier games and shrunk toward `prior`.
+So AVAIL is how much stronger tonight's available roster is than the roster
+mix behind the team's season-to-date rating (negative = key players out or
+gone, positive = stars back / newly acquired).  Only earlier games feed v_i
+and s_i; tonight's game contributes only its active list.
 
-Live: v_i from nba_api leaguedashplayerstats per-game averages, s_i = GP with
-the team / team GP from the same endpoint, a_i = 1 - P(out) from the ESPN
-injury report status (out 1, doubtful .8, questionable .3, day-to-day .2).
+Live: v_i from nba_api leaguedashplayerstats per-game averages, s_i from GP
+with the team / team GP (same endpoint, this and last season), a_i = 1 - P(out)
+from the ESPN injury report status (config.STATUS_WEIGHT), 0 for departed
+players, 1 for everyone else on the roster.
 """
 import os
 

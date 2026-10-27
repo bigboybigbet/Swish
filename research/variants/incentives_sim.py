@@ -34,8 +34,8 @@ from scipy.special import ndtr
 from research.benchmark import CACHE_DIR
 from research.variants import adj_ratings
 from research.variants.incentives_standings import (
-    IS_EAST, TEAM_IX, TEAMS, conference_ranks, has_play_in, lottery_odds,
-    postseason_weight, regular_season_games)
+    IS_EAST, SUSPENSION, TEAM_IX, TEAMS, conference_ranks, has_play_in,
+    lottery_odds, postseason_weight, regular_season_games)
 
 MC = dict(
     n_sims=2000,
@@ -45,7 +45,6 @@ MC = dict(
     seed=2024,
 )
 VERSION = 1
-SUSPENSION = pd.Timestamp("2020-03-12")       # first day without games, 2019-20
 SERIES_PATTERN = (1, 1, 0, 0, 1, 0, 1)        # 1 = better seed at home
 
 

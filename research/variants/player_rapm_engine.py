@@ -33,7 +33,8 @@ minutes (sum 5 per side, f_i = share of the game on court):
 
 With phi = (hfa, theta, c, u) every refit solves the weighted ridge problem
 
-    min  sum_rows 2^(-age_r / hl_days) (y_r - z_r' phi)^2 + sum_k (phi_k - mu_k)^2 / tau_k^2
+    min  sum_rows 2^(-age_r / hl_days) (y_r - z_r' phi)^2 / var_r
+         + sum_k (phi_k - mu_k)^2 / tau_k^2
 
 over the games played so far (normal equations accumulated incrementally,
 dense Cholesky on the players seen in the last `horizon` days).  The
@@ -42,7 +43,8 @@ posterior covariance (same matrix inverted) gives the predictive sd.
 Pre-game, for the players who play (or the available roster):
 
     w_i        = 5 * em_i^a / sum_team em^a      (expected minutes em, EWMA)
-    T_team     = sum_i w_i beta_i + c_team
+    T_team     = sum_i w_i beta_i + c_team - Tbar   (Tbar: average pre-game
+                                                  T of recent games)
     E[margin]  = hfa + T_home - T_away
     sd^2       = sigma^2 + v' Sigma v            (v = d E[margin] / d phi)
 """
@@ -62,23 +64,27 @@ PARAMS = dict(
     sigma=12.0,         # sd of a game margin around its expectation (points)
     cap=30.0,           # margins clipped to ±cap in the fit
     pm_cap=40.0,        # on/off residuals d_i clipped to ±pm_cap
-    hl_days=365.0,      # half-life of a game's weight (calendar days)
+    hl_days=550.0,      # half-life of a game's weight (calendar days)
     season_carry=1.0,   # extra weight factor applied to old games at a new season
     tau=2.5,            # prior sd of u (points / 48)
     rho=0.0,            # prior mean of u = rho * u at the end of last season
-    w_pm=0.5,           # weight of the on/off rows relative to their variance
-    theta_tau=3.0,      # prior sd of the box-score weights (around 0)
+    w_pm=0.3,           # weight of the on/off rows relative to their variance
+    theta_tau=0.5,      # prior sd of the box-score weights (around 0)
     hfa0=2.5,           # prior mean of the home advantage (points)
     hfa_tau=1.5,        # prior sd of the home advantage
     team_tau=0.0,       # prior sd of a team effect; 0 = off
-    box_k=300.0,        # pseudo-minutes shrinking box rates toward average
+    box_k=800.0,        # pseudo-minutes shrinking box rates toward average
     box_hl=60.0,        # half-life of box evidence (games played)
-    min_hl=15.0,        # half-life of the expected-minutes EWMA (games)
+    min_hl=30.0,        # half-life of the expected-minutes EWMA (games)
     min_pow=1.5,        # pre-game weights ∝ expected minutes ** min_pow
-    new_min=12.0,       # expected minutes of a player with no history
+    new_min=20.0,       # expected minutes of a player with no history
     refit_days=7,       # refit the ridge every refit_days days
     horizon=730,        # players seen in the last `horizon` days are solved for
 )
+
+# PARAMS were tuned on the dev window 2014-15 … 2016-17 (coordinate descent on
+# walk-forward log loss); rho, season_carry, team_tau and refit_days had no
+# effect there and stay at their neutral values.
 
 _ARRAYS = ("S", "D", "em", "ea", "ngames", "ns", "known", "played", "team",
            "last_day", "u", "u_prev")
@@ -117,6 +123,7 @@ class PlayerRAPM:
         self.hfa, self.theta = p["hfa0"], np.zeros(N_FEAT)
         self.ceff = np.zeros(MAX_TEAMS)
         self.bbar = 0.0                          # league minute-weighted beta
+        self.sbar = 0.0                          # average pre-game side strength
         self.cols, self.pos, self.Sigma = None, None, None
         self.season, self.n_seasons, self.last_refit = None, 0, None
         self._a_min = 1 - 0.5 ** (1 / p["min_hl"])
@@ -199,7 +206,7 @@ class PlayerRAPM:
         X = self.features(j)
         box, imp = float(w @ (X @ self.theta)), float(w @ self.u[j])
         tc = self.ceff[self.tidx[team]] if team in self.tidx else 0.0
-        out = {"strength": box + imp + tc - 5 * self.bbar, "box": box,
+        out = {"strength": box + imp + tc - self.sbar, "box": box,
                "impact": imp, "team": tc, "w": w, "j": j}
         if with_var:
             out["xw"] = w @ X
@@ -265,6 +272,9 @@ class PlayerRAPM:
         f = np.r_[5 * min_h / min_h.sum(), 5 * min_a / min_a.sum()]
         sgn = np.r_[np.ones(nh), -np.ones(n - nh)]
         th, ta = self.tcol(home), self.tcol(away)
+        B = X @ self.theta + self.u[j]              # pre-game ratings
+        raw = [self.weights(jh) @ B[:nh] + self.ceff[th - 1 - N_FEAT],
+               self.weights(ja) @ B[nh:] + self.ceff[ta - 1 - N_FEAT]]
 
         # local columns: hfa, theta, team_h, team_a, players
         nc = 1 + N_FEAT + 2 + n
@@ -305,6 +315,7 @@ class PlayerRAPM:
         self.n_lg += 1
         rate = 1 / min(self.n_lg, 500)
         self.L += rate * (48 * st.sum(0) / mins.sum() - self.L)
+        self.sbar += rate * (sum(raw) / 2 - self.sbar)
         self.em[jj] += self._a_min * (mins[ok] - self.em[jj])
         self.ea[jj] += self._a_min * (mins[ok] - self.ea[jj])
         for t, uu in ((home, unused_h), (away, unused_a)):
@@ -465,8 +476,8 @@ def prepare(games, box) -> dict:
     }
 
 
-def replay(prep: dict, roster_games: int = 10, with_sd: bool = True,
-           until_season: str = None, **params):
+def replay(prep: dict, roster_games: int = 10, reg_min: float = 20.0,
+           with_sd: bool = True, until_season: str = None, **params):
     """Chronological pass over every game.  Each output row holds the state
     BEFORE that game; the ridge is refit every refit_days from earlier games
     only, and all games of a day are predicted before any is learned from.
@@ -476,9 +487,10 @@ def replay(prep: dict, roster_games: int = 10, with_sd: bool = True,
       RP_LIVE_H / _A       strength of the active roster (players who play +
                            dressed-but-unused), weighted by minutes-if-dressed:
                            what the live app can compute from inactive lists,
-      RP_FULL_H / _A       full strength: regulars of the last `roster_games`
-                           games still on the roster (RP_DIFF - RP_FULL_DIFF
-                           is the effect of absences).
+      RP_FULL_H / _A       full strength: the players who play plus every
+                           rotation player (expected minutes >= reg_min) of
+                           the last `roster_games` games still on the roster
+                           (RP_DIFF - RP_FULL_DIFF is the effect of absences).
     Returns (DataFrame aligned with prep['games'], final engine)."""
     import pandas as pd
     from collections import deque
@@ -509,13 +521,16 @@ def replay(prep: dict, roster_games: int = 10, with_sd: bool = True,
             for jj, uu, t, sfx in ((j[:m - a], u[:um - ua], prep["home"][g], "H"),
                                    (j[m - a:], u[um - ua:], prep["away"][g], "A")):
                 eng.tcol(t)
+                past = recent.setdefault(t, deque(maxlen=roster_games))
+                pool = np.unique(np.concatenate([jj, *past])).astype(np.int64)
+                full = np.union1d(jj, pool[(eng.team[pool] == t)
+                                           & (eng.em[pool] >= reg_min)])
+                if len(jj) == 0:                      # no box score: regulars
+                    jj = full
                 s = eng.side(jj, t, with_var=with_sd)
                 cols["RP_" + sfx][g] = s["strength"]
                 cols["RP_LIVE_" + sfx][g] = eng.side(np.r_[jj, uu], t,
                                                      dressed=True)["strength"]
-                past = recent.setdefault(t, deque(maxlen=roster_games))
-                pool = np.unique(np.concatenate([jj, *past]))
-                full = np.union1d(jj, pool[eng.team[pool] == t])
                 cols["RP_FULL_" + sfx][g] = eng.side(full, t)["strength"]
                 sides.append(s)
             hs, aws = sides

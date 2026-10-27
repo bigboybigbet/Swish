@@ -75,11 +75,13 @@ def replay_elo(games: pd.DataFrame) -> np.ndarray:
     return out
 
 
-def build_dataset(raw: pd.DataFrame, data_dir: str = DEFAULT_DATA_DIR) -> pd.DataFrame:
+def build_dataset(raw: pd.DataFrame, data_dir: str = DEFAULT_DATA_DIR,
+                  box: pd.DataFrame = None, use_cache: bool = True) -> pd.DataFrame:
+    """One row per game: ids, RESULT, MARGIN and FEATURES (cached)."""
     key = json.dumps([VERSION, RATING, AVAIL, REPLACEMENT, len(raw)], sort_keys=True)
     path = os.path.join(CACHE_DIR, "features_v6_%s.parquet"
                         % hashlib.md5(key.encode()).hexdigest()[:10])
-    if os.path.exists(path):
+    if use_cache and os.path.exists(path):
         return pd.read_parquet(path)
 
     tg = fb.team_games(raw)
@@ -87,7 +89,7 @@ def build_dataset(raw: pd.DataFrame, data_dir: str = DEFAULT_DATA_DIR) -> pd.Dat
     tg["NRTG_S"] = fb.shrunk_std(tg, "NRTG", prior, RATING["k"])
     tg["G6"] = fb.schedule_features(tg)["G6"]
 
-    box = load_box(data_dir).copy()
+    box = (load_box(data_dir) if box is None else box).copy()
     box["GMSC"] = box["GMSC"] - REPLACEMENT * box["MIN"]
     av = fpl.availability(box, tg, **AVAIL)
     tg = tg.merge(av, on=["GAME_ID", "TEAM_ID"], how="left")
@@ -100,8 +102,9 @@ def build_dataset(raw: pd.DataFrame, data_dir: str = DEFAULT_DATA_DIR) -> pd.Dat
     games["G6_DIFF"] = games["H_G6"] - games["A_G6"]
     df = games[["GAME_ID", "GAME_DATE", "SEASON", "RESULT", "MARGIN",
                 "H_TEAM_ID", "A_TEAM_ID", "NEUTRAL"] + FEATURES]
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    df.to_parquet(path, index=False)
+    if use_cache:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        df.to_parquet(path, index=False)
     return df
 
 

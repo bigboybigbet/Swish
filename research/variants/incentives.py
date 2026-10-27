@@ -29,12 +29,15 @@ same for top-4 seed + same for the 1 seed.  Full-season stake, the tank
 incentive and the rest / dead flags added nothing on dev (FULL_INCENTIVE is
 reported as a pre-declared secondary set, not selected).
 
-Results (research/variants/incentives_eval.py; holdout 2017-18..2023-24 run
-once): overall logloss 0.6277 -> 0.6270 (d -0.0007 +- 0.0006, not a win);
-last-20-games subset d -0.0028 +- 0.0025; with the who-plays control the
-gain shrinks to -0.0003 +- 0.0005.  Who-plays itself: -0.0055 +- 0.0011.
-2019-20 (bubble) is the only season where it clearly hurts; the last three
-seasons show no effect.  Not recommended for production as is.
+Results (research/variants/incentives_eval.py; holdout 2017-18..2023-24,
+frozen config): overall logloss 0.6277 -> 0.6269 (d -0.0008 +- 0.0006, not
+a win); either-team-in-last-20-games subset d -0.0036 +- 0.0027; with the
+who-plays control the gain shrinks to -0.0005 +- 0.0005.  Who-plays itself:
+-0.0055 +- 0.0011.  2019-20 (bubble) is the only season where it clearly
+hurts; the last three seasons show no effect.  Not recommended for
+production as is.  (Audit fix: 2019-20 games remaining before the March 2020
+suspension now count from the 82-game schedule, not the realised 64-75
+games; first run gave 0.6270, d -0.0007.)
 
 Live use (each morning, before predictions):
   1. logs = nba_api leaguegamefinder team logs up to yesterday (the app

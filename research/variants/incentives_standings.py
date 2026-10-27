@@ -37,8 +37,20 @@ LOTTERY_NEW = np.array([14.0, 14.0, 14.0, 12.5, 10.5, 9.0, 7.5, 6.0, 4.5, 3.0,
                         2.0, 1.5, 1.0, 0.5]) / 100      # 2018-19 season onward
 
 
+SUSPENSION = pd.Timestamp("2020-03-12")       # 2019-20: first day without games
+
+
 def season_start_year(season: str) -> int:
     return int(season[:4])
+
+
+def known_schedule_length(season: str, day, total: np.ndarray) -> np.ndarray:
+    """Games per team as known on `day`.  Before the March 2020 suspension the
+    2019-20 schedule still had 82 games for every team; the realised totals
+    (64-75) would leak the cancellation into games-remaining."""
+    if season == "2019-20" and pd.Timestamp(day) < SUSPENSION:
+        return np.full(30, 82.0)
+    return total
 
 
 def has_play_in(season: str) -> bool:
@@ -97,7 +109,8 @@ def conference_ranks(wpct: np.ndarray, tiebreak: np.ndarray) -> np.ndarray:
 def pregame_standings(games: pd.DataFrame) -> pd.DataFrame:
     """Per regular-season game and side: W, L, games remaining, conference
     rank and games back of the 1st / 6th / 8th / 10th place team, all from
-    games on strictly earlier dates.  Columns are suffixed _H / _A."""
+    games on strictly earlier dates; games remaining from the schedule as
+    known that day.  Columns are suffixed _H / _A."""
     rows = []
     for season, g in games.groupby("SEASON", sort=False):
         total = np.bincount(g["HI"], minlength=30) + np.bincount(g["AI"], minlength=30)
@@ -119,7 +132,7 @@ def pregame_standings(games: pd.DataFrame) -> pd.DataFrame:
                     k = by_seed[place - 1]
                     feats[idx, 4 + j] = ((W[k] - W[idx]) + (L[idx] - L[k])) / 2
             feats[:, 0], feats[:, 1] = W, L
-            feats[:, 2] = total - gp
+            feats[:, 2] = known_schedule_length(season, dates[s], total) - gp
             feats[:, 3] = seed
             out[s:e, 0] = feats[HI[s:e]]
             out[s:e, 1] = feats[AI[s:e]]

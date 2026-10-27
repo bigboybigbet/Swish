@@ -36,7 +36,7 @@ from scipy.special import log_ndtr, ndtr
 
 from research.benchmark import CACHE_DIR, DEFAULT_DATA_DIR
 from research.variants.kalman_engine import (
-    EPOCH, LINEUP_COLS, PARAMS, PLAYER_PARAMS, KalmanRatings, PlayerBook,
+    EPOCH, PARAMS, PLAYER_PARAMS, KalmanRatings, PlayerBook,
     box_table, game_table, lineup_strength, player_values, replay)
 
 BOX_FILES = ["regular_season_box_scores_2010_2024_part_1.csv",

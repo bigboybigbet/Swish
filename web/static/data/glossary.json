@@ -1,0 +1,15 @@
+{
+  "elo": "Elo: a team-strength rating updated after every game, scaled by margin of victory. 1500 is average; 100 points is roughly a 64% win chance on a neutral court.",
+  "kalman": "Kalman rating: team strength in points per game versus an average team, with an uncertainty that grows between games and shrinks as results come in.",
+  "sd": "±SD: one standard deviation of the rating's uncertainty. About two thirds of the time the true strength lies within this band.",
+  "adjusted_net": "Adjusted net: points scored minus allowed per 100 possessions, adjusted for opponent strength and home court.",
+  "healthy_current": "Healthy is the team's strength with everyone available; Current removes injured players weighted by their status. The gap is the injury deficit.",
+  "fair_line": "Fair line: the moneyline that matches the model's win probability with no bookmaker margin.",
+  "overround": "Overround: how much the bookmaker's implied probabilities add up to above 100%. That excess is the bookmaker's margin.",
+  "edge": "Edge: model probability minus the market's fair (de-vigged) probability. Positive means the model rates the side higher than the market.",
+  "kelly": "Kelly: the stake, as a % of bankroll, that maximises long-run growth at this price. Shown as a fraction of full Kelly and capped. Not betting advice.",
+  "brier": "Brier score: mean squared error of the win probabilities. Lower is better; always saying 50% scores 0.25.",
+  "log_loss": "Log loss: penalises confident wrong forecasts heavily. Lower is better; a coin flip scores 0.693.",
+  "calibration_gap": "Calibration gap: actual win rate minus the average forecast in a probability band. Near zero means the probabilities can be taken at face value.",
+  "within_3": "Within 3: the chance the final margin is 3 points or fewer either way, from the Monte Carlo simulation."
+}

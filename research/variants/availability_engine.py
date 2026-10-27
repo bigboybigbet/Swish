@@ -55,6 +55,13 @@ PARAMS = dict(
     b_rel=-1.0,       # prior relative plus-minus per 48
 )
 
+# box-score totals kept per player for the lineup box profile
+BOX_SRC = {"PTS": "points", "FGA": "fieldGoalsAttempted", "FG3A": "threePointersAttempted",
+           "FTA": "freeThrowsAttempted", "OREB": "reboundsOffensive",
+           "DREB": "reboundsDefensive", "AST": "assists", "STL": "steals",
+           "BLK": "blocks", "TOV": "turnovers", "PF": "foulsPersonal"}
+BOX = list(BOX_SRC)
+
 # index of each sum inside a player's season vector
 MIN, GS, PM, REL, GP = range(5)
 
@@ -102,6 +109,8 @@ def load_box(data_dir: str = DEFAULT_DATA_DIR, use_cache: bool = True) -> pd.Dat
         "GS": np.where(mins > 0, gs, 0.0),
         "PM": np.where(mins > 0, n("plusMinusPoints"), 0.0),
     })
+    for k, c in BOX_SRC.items():
+        out[k] = np.where(mins > 0, n(c), 0.0)
     os.makedirs(CACHE_DIR, exist_ok=True)
     out.to_parquet(BOX_CACHE, index=False)
     return out
@@ -128,14 +137,12 @@ def game_table(raw: pd.DataFrame) -> pd.DataFrame:
 
 # ── replay ────────────────────────────────────────────────────────────────────
 
-FEATS = ["NEWS_MIN", "NEWS_GS", "NEWS_PM", "NEWS_REL",
-         "MISS_MIN", "MISS_GS", "MISS_PM", "MISS_REL",
-         "RET_MIN", "RET_GS", "RET_PM", "RET_REL",
-         "STR_GS", "STR_PM", "STR_REL", "CONT", "TEAM_GP"]
-
-
-def _vec():
-    return [0.0, 0.0, 0.0, 0.0, 0.0]
+FEATS = (["NEWS_MIN", "NEWS_GS", "NEWS_PM", "NEWS_REL",
+          "MISS_MIN", "MISS_GS", "MISS_PM", "MISS_REL",
+          "RET_MIN", "RET_GS", "RET_PM", "RET_REL",
+          "STR_GS", "STR_PM", "STR_REL", "CONT", "TEAM_GP"]
+         + ["BOX_" + k for k in BOX])
+NV = 5 + len(BOX)     # season vector: MIN, GS, PM, REL, GP, box totals
 
 
 class Engine:
@@ -145,9 +152,11 @@ class Engine:
         self.p = {**PARAMS, **params}
         self.alpha_part = 1 - 0.5 ** (1 / self.p["part_hl"])
         self.alpha_min = 1 - 0.5 ** (1 / self.p["min_hl"])
-        self.pl = {}          # pid -> [season, cur vec, prev vec, em]
+        hl = self.p.get("pm_hl", 0.0)
+        self.decay = 0.5 ** (1 / hl) if hl > 0 else None
+        self.pl = {}          # pid -> [season, cur vec, prev vec, em, decayed (MIN, PM, REL)]
         self.part = {}        # tid -> {pid: participation}
-        self.lg = {}          # season -> league vec (MIN, GS)
+        self.lg = {}          # season -> league totals vec
         self.team_min = {}    # (tid, season) -> {pid: minutes}
         self.team_gp = {}     # (tid, season) -> games played
 
@@ -162,40 +171,52 @@ class Engine:
             return None, st[1]
         return None, None
 
-    def _league_gs48(self, s):
-        for k, w in ((s, 1.0), (s - 1, 1.0)):
+    def _league(self, s):
+        """League per-48 rates (this season, else last season)."""
+        for k in (s, s - 1):
             v = self.lg.get(k)
-            if v and v[0] > 5000:
-                return 48 * v[1] / v[0]
-        return 22.0
+            if v is not None and v[MIN] > 5000:
+                return 48 * v / v[MIN]
+        return None
 
-    def ratings(self, pid, s, lg48):
-        """(em, R_gs, R_pm, R_rel) of a player before a game in season s."""
+    def ratings(self, pid, s, lg):
+        """(em, R_gs, R_pm, R_rel, box rates per 48) before a game in season s."""
         p = self.p
         cur, prev = self._sums(pid, s)
-        m = [0.0] * 5
-        for vec, w in ((cur, 1.0), (prev, p["w_prev"])):
-            if vec is not None:
-                for j in range(5):
-                    m[j] += w * vec[j]
+        m = np.zeros(NV)
+        if cur is not None:
+            m += cur
+        if prev is not None:
+            m += p["w_prev"] * prev
         st = self.pl.get(pid)
         em = st[3] if st is not None else p["new_min"]
-        r_gs = (48 * m[GS] + p["k_gs"] * (lg48 + p["b_gs"])) / (m[MIN] + p["k_gs"]) - lg48
-        r_pm = (48 * m[PM] + p["k_pm"] * p["b_pm"]) / (m[MIN] + p["k_pm"])
-        r_rel = (48 * m[REL] + p["k_rel"] * p["b_rel"]) / (m[MIN] + p["k_rel"])
-        return em, r_gs, r_pm, r_rel
+        lg_gs = lg[GS] if lg is not None else 22.0
+        r_gs = (48 * m[GS] + p["k_gs"] * (lg_gs + p["b_gs"])) / (m[MIN] + p["k_gs"]) - lg_gs
+        if self.decay is not None:
+            d = st[4] if st is not None else (0.0, 0.0, 0.0)
+            pm_min, pm, rel = d
+        else:
+            pm_min, pm, rel = m[MIN], m[PM], m[REL]
+        r_pm = (48 * pm + p["k_pm"] * p["b_pm"]) / (pm_min + p["k_pm"])
+        r_rel = (48 * rel + p["k_rel"] * p["b_rel"]) / (pm_min + p["k_rel"])
+        box = None
+        if lg is not None:
+            kb = p.get("k_box", 300.0)
+            box = (48 * m[5:] + kb * lg[5:]) / (m[MIN] + kb)
+        return em, r_gs, r_pm, r_rel, box
 
     def features(self, tid, s, avail: set) -> list:
         """Pre-game availability features of team tid (see module doc)."""
-        lg48 = self._league_gs48(s)
+        lg = self._league(s)
         part = self.part.get(tid, {})
         news = [0.0] * 4
         miss = [0.0] * 4
         ret = [0.0] * 4
         strength = [0.0] * 3
+        box = np.zeros(len(BOX))
         tot_m = 0.0
         for pid in set(part) | avail:
-            em, r_gs, r_pm, r_rel = self.ratings(pid, s, lg48)
+            em, r_gs, r_pm, r_rel, b = self.ratings(pid, s, lg)
             a = 1.0 if pid in avail else 0.0
             d = (a - part.get(pid, 0.0)) * em / 48
             x = (d, d * r_gs, d * r_pm, d * r_rel)
@@ -208,17 +229,21 @@ class Engine:
                 strength[0] += em * r_gs
                 strength[1] += em * r_pm
                 strength[2] += em * r_rel
+                if b is not None:
+                    box += em * b
         scale = 5.0 / tot_m if tot_m > 0 else 0.0
         strength = [v * scale for v in strength]
+        box = box * scale if lg is not None else np.full(len(BOX), np.nan)
         last = self.team_min.get((tid, s - 1), {})
         tot_last = sum(last.values())
         roster = avail | set(self.team_min.get((tid, s), {}))
         cont = (sum(v for k, v in last.items() if k in roster) / tot_last
                 if tot_last > 0 else np.nan)
-        return news + miss + ret + strength + [cont, self.team_gp.get((tid, s), 0)]
+        return (news + miss + ret + strength
+                + [cont, self.team_gp.get((tid, s), 0)] + list(box))
 
     def update(self, tid, s, margin, rows):
-        """Feed one finished team-game: rows of (pid, status, min, gs, pm)."""
+        """Feed one finished team-game: rows of (pid, status, min, gs, pm, box...)."""
         a_p, a_m = self.alpha_part, self.alpha_min
         part = self.part.setdefault(tid, {})
         for k in list(part):
@@ -227,35 +252,37 @@ class Engine:
                 del part[k]
         tm = self.team_min.setdefault((tid, s), {})
         self.team_gp[(tid, s)] = self.team_gp.get((tid, s), 0) + 1
-        lg = self.lg.setdefault(s, [0.0, 0.0])
-        for pid, status, mins, gs, pm in rows:
+        lg = self.lg.setdefault(s, np.zeros(NV))
+        for pid, status, mins, gs, pm, *box in rows:
             if status != 2:
                 continue
+            pid = int(pid)
             st = self.pl.get(pid)
             if st is None:
-                st = self.pl[pid] = [s, _vec(), None, self.p["new_min"]]
+                st = self.pl[pid] = [s, np.zeros(NV), None, self.p["new_min"], (0.0, 0.0, 0.0)]
             if st[0] != s:
                 st[2] = st[1] if st[0] == s - 1 else None
-                st[1] = _vec()
+                st[1] = np.zeros(NV)
                 st[0] = s
-            v = st[1]
-            v[MIN] += mins
-            v[GS] += gs
-            v[PM] += pm
-            v[REL] += pm - margin * mins / 48
-            v[GP] += 1
+            rel = pm - margin * mins / 48
+            x = np.array([mins, gs, pm, rel, 1.0] + box)
+            st[1] += x
+            lg += x
             st[3] += a_m * (mins - st[3])
+            if self.decay is not None:
+                lam = self.decay
+                d = st[4]
+                st[4] = (lam * d[0] + mins, lam * d[1] + pm, lam * d[2] + rel)
             part[pid] = part.get(pid, 0.0) + a_p
             tm[pid] = tm.get(pid, 0.0) + mins
-            lg[0] += mins
-            lg[1] += gs
 
 
 def replay(games: pd.DataFrame, box: pd.DataFrame, **params) -> pd.DataFrame:
     """Pre-game features H_*, A_* for every row of games (same order)."""
     eng = Engine(**params)
     box = box[box["GAME_ID"].isin(set(games["GAME_ID"]))]
-    by_tg = {k: list(zip(g["PLAYER_ID"], g["STATUS"], g["MIN"], g["GS"], g["PM"]))
+    cols = ["PLAYER_ID", "STATUS", "MIN", "GS", "PM"] + BOX
+    by_tg = {k: list(map(tuple, g[cols].values.tolist()))
              for k, g in box.groupby(["GAME_ID", "TEAM_ID"], sort=False)}
     season = games["SEASON"].str[:4].astype(int).values
     out = np.full((len(games), 2, len(FEATS)), np.nan)
@@ -270,14 +297,14 @@ def replay(games: pd.DataFrame, box: pd.DataFrame, **params) -> pd.DataFrame:
         for k in range(i, j):            # pre-game reads for the whole day
             for side, t in ((0, hid[k]), (1, aid[k])):
                 rows = by_tg.get((gid[k], t), [])
-                avail = {r[0] for r in rows if r[1] >= 1}
+                avail = {int(r[0]) for r in rows if r[1] >= 1}
                 out[k, side] = eng.features(t, season[k], avail)
         for k in range(i, j):            # then the day's results
             for t, mg in ((hid[k], margin[k]), (aid[k], -margin[k])):
                 eng.update(t, season[k], mg, by_tg.get((gid[k], t), []))
         i = j
-    cols = {}
+    res = {}
     for side, pre in ((0, "H_"), (1, "A_")):
         for f, name in enumerate(FEATS):
-            cols[pre + name] = out[:, side, f]
-    return pd.DataFrame(cols, index=games.index)
+            res[pre + name] = out[:, side, f]
+    return pd.DataFrame(res, index=games.index)
