@@ -38,7 +38,10 @@ _load_elo = load_elo
 _cache    = cache
 
 ORDER  = ("elo", "mc", "xgb")
-LABELS = {"elo": "Elo", "mc": "Monte Carlo", "xgb": "XGBoost"}
+LABELS = {"elo": "Elo", "mc": "Monte Carlo", "xgb": "XGBoost",
+          "rating": "Team rating gap", "home": "Home court", "b2b": "Back-to-back",
+          "injuries": "Injuries"}
+TS_ORDER = ("rating", "home", "b2b", "injuries")
 X0     = {"elo": 0.0, "mc": 0.5, "xgb": 0.5}      # neutral game: coin-flip engines, equal Elo
 INCLUDE = ("hist", "shap", "poisson")
 RADAR_AXES = ["eFG%", "TS%", "AST/TOV", "OREB%", "Reb", "+/-"]
@@ -202,6 +205,16 @@ def blend_ladder(weights: dict, bias: float, x: dict, probs: dict, n_updates=Non
     return _ladder("blend_calibrator", base, bias, contrib, weights, probs, ORDER, n_updates)
 
 
+def team_strength_ladder(ts: dict) -> dict:
+    """Kalman-Elo: logit = a + b·(rating gap + home + back-to-back + injuries),
+    so each term's contribution is b × its points."""
+    a, b = ts["coef"]["a"], ts["coef"]["b"]
+    contrib = {k: b * ts["terms"][k] for k in TS_ORDER}
+    probs = {k: _sigmoid(a + contrib[k]) for k in TS_ORDER}
+    return _ladder("team_strength", a, a, contrib, {k: b for k in TS_ORDER}, probs,
+                   TS_ORDER, ts["coef"].get("n_fit"))
+
+
 def elo_ladder(elo_p: float) -> dict:
     """elo_only: a single Elo component with weight 1 on its own log-odds."""
     return _ladder("elo", 0.0, 0.0, {"elo": _logit(elo_p)}, {"elo": 1.0}, {"elo": elo_p},
@@ -326,12 +339,17 @@ def predict_core(home_id: int, away_id: int, d: date | None = None, odds: dict |
     # Engines, all on the same injury-adjusted rows (E7).
     model = model_store.get_model()
     calib = get_calibrator()
-    det = predict_detail(hd, ad, model, h_inj, a_inj, calibrator=calib)
+    det = predict_detail(hd, ad, model, h_inj, a_inj, calibrator=calib, game_date=d)
     hs, as_, mc = det["hs"], det["as"], det["mc"]
     elo_p = elo_expected(hs["ELO"] + ELO_HOME_ADV, as_["ELO"])
     mc_p, xgb_p = det["mc_p"], det["xgb_p"]
 
-    if model is not None:
+    ts = det["ts"]
+    if ts is not None:
+        mode = "team_strength"
+        ensemble = team_strength_ladder(ts)
+        p_home, conflict = float(det["fp"]), bool(det["conflict"])
+    elif model is not None:
         mode = "blend_v5"
         w = dict(zip(("xgb", "mc", "elo"), (float(v) for v in calib.weights)))
         ensemble = blend_ladder(w, float(calib.bias),
@@ -379,7 +397,7 @@ def predict_core(home_id: int, away_id: int, d: date | None = None, odds: dict |
 
     if h_form["stale"] or a_form["stale"]:
         caveats.append("stats_stale")
-    if d < clock.today_et():
+    if d < clock.today_et() and ts is None:
         caveats.append("past_date_current_elo")
     if clock.is_demo():
         caveats.append("demo_mode")
@@ -398,7 +416,8 @@ def predict_core(home_id: int, away_id: int, d: date | None = None, odds: dict |
         "win_prob": {"home": r4(p_home), "away": r4(1 - p_home)},
         "pick": pick,
         "flags": flags,
-        "engines": {"xgb": r4(xgb_p), "mc": r4(mc_p), "elo": r4(elo_p), "poisson": None},
+        "engines": {"xgb": r4(xgb_p), "mc": r4(mc_p), "elo": r4(elo_p), "poisson": None,
+                    "team_strength": r4(ts["p_home"]) if ts else None},
         "ensemble": ensemble,
         **dist,
         "market": mkt,
@@ -412,7 +431,9 @@ def predict_core(home_id: int, away_id: int, d: date | None = None, odds: dict |
         },
         "ratings": {
             side_: {"elo": r1(s["ELO"]), "elo_rank": elo_rank(elo, t["id"]),
-                    "kalman": None, "adjusted": None, "player_sum": None}
+                    "kalman": ({"rating": r1(ts[f"rating_{side_}"]), "sd": r1(ts[f"sd_{side_}"]),
+                                "b2b": ts[f"b2b_{side_}"]} if ts else None),
+                    "adjusted": None, "player_sum": None}
             for side_, s, t in (("home", hd, home), ("away", ad, away))
         },
         "availability": {"home": h_av, "away": a_av},

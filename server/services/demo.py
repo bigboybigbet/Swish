@@ -179,6 +179,22 @@ def _elo_as_of(d: date) -> dict:
     return elo
 
 
+_ts_state: dict = {}
+
+
+def team_strength_state(path=None) -> dict | None:
+    """The Kalman-Elo state as Train would build it on the demo date: the
+    4 seasons ending with the demo season, games before the date only."""
+    d = demo_date()
+    if d not in _ts_state:
+        from engine import team_strength
+        seasons = config.recent_seasons(team_strength.REPLAY_SEASONS, datetime.combine(d, dtime()))
+        raw = history()
+        raw = raw[(raw["GAME_DATE"] < pd.Timestamp(d)) & raw["SEASON_YEAR"].isin(seasons)]
+        _ts_state[d] = team_strength.build_state(raw) if len(raw) else None
+    return _ts_state[d]
+
+
 def elo_ratings() -> dict:
     """The Elo file as of the demo date: {team name: rating}."""
     out = {}
@@ -192,8 +208,9 @@ def elo_ratings() -> dict:
 # ── install / uninstall ──────────────────────────────────────────────────────
 
 def _targets(mem: MemoryCache) -> list:
-    from engine import features
+    from engine import features, team_strength
     return [
+        (team_strength, "get_state", team_strength_state),
         (espn, "_fetch_scoreboard", fetch_scoreboard),
         (espn, "_fetch_injury_feed", fetch_injury_feed),
         (espn, "_cache", mem),

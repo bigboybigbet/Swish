@@ -90,6 +90,7 @@ def replay(games: pd.DataFrame, **params) -> pd.DataFrame:
     p = {**PARAMS, **params}
     s2, q, vmax, hfa, b2b = p["sigma"] ** 2, p["q"], p["v_max"], p["hfa"], p["b2b"]
     R, V, last, season = {}, {}, {}, None
+    hist = {}                      # team → [[day, R_after, V_after, season], ...]
     day = ((games["GAME_DATE"] - EPOCH).dt.days).tolist()
 
     n = len(games)
@@ -123,11 +124,14 @@ def replay(games: pd.DataFrame, **params) -> pd.DataFrame:
         R[a] = ra - va / S * err
         V[h] = vh - vh * vh / S
         V[a] = va - va * va / S
+        for t in (h, a):
+            hist.setdefault(t, []).append([d, round(R[t], 4), round(V[t], 4), s])
 
     out = pd.DataFrame(cols, index=games.index)
     out["EXP_MARGIN"] = (out["R_H"] - out["R_A"] + hfa
                          + b2b * (out["B2B_A"] - out["B2B_H"]))
-    out.attrs["state"] = {"R": R, "V": V, "last_day": last, "season": season}
+    out.attrs["state"] = {"R": R, "V": V, "last_day": last, "season": season,
+                          "history": hist}
     return out
 
 
@@ -171,7 +175,8 @@ def build_state(raw: pd.DataFrame, fit_seasons=None) -> dict:
         "season": st["season"],
         "teams": {str(t): {"name": names[t], "rating": round(st["R"][t], 3),
                            "var": round(st["V"][t], 3),
-                           "last_day": st["last_day"].get(t)}
+                           "last_day": st["last_day"].get(t),
+                           "history": st["history"].get(t, [])}
                   for t in st["R"]},
         "last_game_date": str(games["GAME_DATE"].max().date()),
         "n_games": len(games),
@@ -225,43 +230,72 @@ def find_team(state: dict, team_name: str) -> dict | None:
     return None
 
 
+def _as_of(team: dict, day: int, season: str, p: dict) -> tuple:
+    """(rating, variance, back_to_back) of a team before a game on `day`,
+    from its post-game history — so past dates never see later games."""
+    prev = [h for h in team.get("history", []) if h[0] < day]
+    if not prev:
+        return 0.0, p["v0"], False
+    d, r, v, s = prev[-1]
+    if s != season:                      # first game of a new season
+        return p["carry"] * r, min(v + p["v_season"], p["v_max"]), False
+    return r, min(v + p["q"] * (day - d), p["v_max"]), day - d == 1
+
+
 def predict(state: dict, home: str, away: str, game_date=None,
             home_pts_lost: float = 0.0, away_pts_lost: float = 0.0) -> dict:
-    """Pre-game expected home margin and P(home win).
+    """Pre-game expected home margin and P(home win) for a game on
+    `game_date` (default: today, US Eastern), using only games before it.
 
     `*_pts_lost` are points of strength removed for injured players.
     """
     p = state["params"]
-    h, a = find_team(state, home), find_team(state, away)
+    h, a = find_team(state, str(home)), find_team(state, str(away))
     if h is None or a is None:
         raise KeyError(f"team not found: {home if h is None else away}")
     date = pd.Timestamp(game_date).normalize() if game_date is not None else us_eastern_today()
-    new_season = current_season(date.to_pydatetime()) != state["season"]
     day = (date - EPOCH).days
+    season = current_season(date.to_pydatetime())
 
-    def side(t):
-        rating = t["rating"] * (p["carry"] if new_season else 1.0)
-        b2b = (not new_season) and t["last_day"] is not None and day - t["last_day"] == 1
-        return rating, bool(b2b), float(np.sqrt(t["var"]))
-
-    rh, b2b_h, sd_h = side(h)
-    ra, b2b_a, sd_a = side(a)
-    margin = (rh - home_pts_lost) - (ra - away_pts_lost) + p["hfa"] \
-        + p["b2b"] * (float(b2b_a) - float(b2b_h))
+    rh, vh, b2b_h = _as_of(h, day, season, p)
+    ra, va, b2b_a = _as_of(a, day, season, p)
+    rating_term = rh - ra
+    b2b_term = p["b2b"] * (float(b2b_a) - float(b2b_h))
+    injury_term = away_pts_lost - home_pts_lost
+    margin = rating_term + p["hfa"] + b2b_term + injury_term
     c = state["coef"]
     prob = 1 / (1 + np.exp(-(c["a"] + c["b"] * margin)))
     return {
         "p_home": float(prob), "exp_margin": float(margin),
-        "rating_home": rh, "rating_away": ra, "sd_home": sd_h, "sd_away": sd_a,
-        "b2b_home": b2b_h, "b2b_away": b2b_a,
+        "rating_home": rh, "rating_away": ra,
+        "sd_home": float(np.sqrt(vh)), "sd_away": float(np.sqrt(va)),
+        "b2b_home": bool(b2b_h), "b2b_away": bool(b2b_a),
         "pts_lost_home": home_pts_lost, "pts_lost_away": away_pts_lost,
+        # logit decomposition: a + b·(rating + home + b2b + injuries)
+        "terms": {"rating": rating_term, "home": p["hfa"], "b2b": b2b_term,
+                  "injuries": injury_term},
+        "coef": dict(c),
     }
+
+
+_cache = {"mtime": None, "state": None}
+
+
+def get_state(path: str = TEAM_STRENGTH_FILE) -> dict | None:
+    """The saved state, re-read only when the file changes."""
+    if not os.path.exists(path):
+        return None
+    mtime = os.path.getmtime(path)
+    if _cache["mtime"] != mtime:
+        _cache["state"], _cache["mtime"] = load_state(path), mtime
+    return _cache["state"]
 
 
 def ratings_table(state: dict) -> pd.DataFrame:
     """Teams ranked by rating, with a ±1 sd band."""
-    rows = [{"TEAM": t["name"], "RATING": t["rating"], "SD": float(np.sqrt(t["var"]))}
-            for t in state["teams"].values()]
+    rows = [{"TEAM_ID": int(k), "TEAM": t["name"], "RATING": t["rating"],
+             "SD": float(np.sqrt(t["var"]))}
+            for k, t in state["teams"].items()]
     df = pd.DataFrame(rows).sort_values("RATING", ascending=False).reset_index(drop=True)
     df.index += 1
     return df

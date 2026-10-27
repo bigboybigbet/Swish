@@ -414,6 +414,10 @@ def train_model(force_rebuild: bool = False, use_optuna: bool = False,
     if df is None or df.empty:
         return None, 0, None
 
+    from engine import team_strength
+    report("Rebuilding Kalman-Elo team strength…")
+    team_strength.refresh(status_cb=report)
+
     model, metrics = fit_matchup_model(df, use_optuna=use_optuna, report=report)
     atomic_joblib_dump(model, MODEL_FILE)
     report(
@@ -531,14 +535,48 @@ def injury_adjusted(hd: dict, ad: dict, h_inj=None, a_inj=None) -> tuple:
     return apply_injury_adjustment(hd, hf), apply_injury_adjustment(ad, af), hf, af
 
 
+def team_strength_detail(hd: dict, ad: dict, hf: float, af: float,
+                         game_date=None) -> dict | None:
+    """Kalman-Elo prediction (engine.team_strength) or None without a state.
+    Injury factors become points: a star out (factor ~0.7) ≈ −4.5 points."""
+    from engine import team_strength
+    state = team_strength.get_state()
+    if state is None:
+        return None
+    date = game_date or hd.get("GAME_DATE")
+    try:
+        return team_strength.predict(
+            state, hd.get("team_id") or hd["name"], ad.get("team_id") or ad["name"],
+            date, home_pts_lost=(1.0 - hf) * 15.0, away_pts_lost=(1.0 - af) * 15.0)
+    except KeyError:
+        return None
+
+
+def _recentre_margins(mc: dict, margin: float):
+    """Shift the simulated scores so the margin distribution is centred on
+    the team-strength margin; its spread and the totals are unchanged.
+    mc_home_prob keeps the raw simulation as a reference engine."""
+    delta = margin - float(np.mean(mc["_margins"]))
+    mc["_h_sims"] = mc["_h_sims"] + delta / 2
+    mc["_a_sims"] = mc["_a_sims"] - delta / 2
+    mc["_margins"] = mc["_h_sims"] - mc["_a_sims"]
+    m = mc["_margins"]
+    mc["spread_margin"] = float(np.mean(m))
+    mc["spread_lo"], mc["spread_hi"] = (float(x) for x in np.percentile(m, [25, 75]))
+    mc["ot_prob"] = float(np.mean(np.abs(m) <= 3))
+
+
 def predict_detail(hd: dict, ad: dict, model, h_inj=None, a_inj=None,
-                   calibrator: "BlendCalibrator | None" = None) -> dict:
+                   calibrator: "BlendCalibrator | None" = None, game_date=None) -> dict:
     """
     predict_hybrid's numbers as a dict, plus the injury-adjusted rows they
     came from (hs, as, row) so explanations use exactly what the model saw.
 
-    model=None (no trained model) skips XGBoost and the blend: xgb_p, fp
-    and conflict are then None and the caller decides the final number.
+    v6: when a team-strength state exists (engine.team_strength), fp and
+    the spread come from the Kalman-Elo margin model; XGBoost and Monte
+    Carlo stay as reference engines.  Without it, model=None skips XGBoost
+    and the blend: xgb_p, fp and conflict are then None and the caller
+    decides the final number.
     """
     hs, as_, hf, af = injury_adjusted(hd, ad, h_inj, a_inj)
     row = build_matchup_row(hs, as_)
@@ -549,15 +587,22 @@ def predict_detail(hd: dict, ad: dict, model, h_inj=None, a_inj=None,
     mc_p     = mc["mc_home_prob"]
     elo_diff = hs.get("ELO", ELO_DEFAULT) - as_.get("ELO", ELO_DEFAULT)
 
+    ts = team_strength_detail(hd, ad, hf, af, game_date)
     fp = conflict = None
-    if xgb_p is not None:
+    spread = mc["spread_margin"]
+    if ts is not None:
+        fp       = ts["p_home"]
+        spread   = ts["exp_margin"]
+        conflict = (fp > 0.5) != (mc_p > 0.5)
+        _recentre_margins(mc, spread)
+    elif xgb_p is not None:
         calib    = calibrator or get_calibrator()
         fp       = calib.predict(xgb_p, mc_p, elo_diff)
         conflict = (xgb_p > 0.5) != (mc_p > 0.5)
     return {
         "fp": fp, "xgb_p": xgb_p, "mc_p": mc_p, "elo_diff": elo_diff,
         "conflict": conflict, "mc": mc, "hf": hf, "af": af,
-        "hs": hs, "as": as_, "row": row,
+        "hs": hs, "as": as_, "row": row, "ts": ts, "spread": spread,
     }
 
 
@@ -566,13 +611,11 @@ def predict_hybrid(hd: dict, ad: dict, model,
     """
     Returns (fp, spread, total, xgb_p, mc_p, conflict, mc_dict, hf, af).
 
-    v5: XGBoost sees BOTH teams at once via a single matchup-differential
-    row (home form minus away form + pre-game Elo diff), instead of two
-    independent single-team predictions.  fp is then produced by
-    BlendCalibrator — a learned logistic regression over
-    (xgb_p, mc_p, elo_diff) whose weights shift after every game result.
+    v6: fp and spread come from the Kalman-Elo team strength model when its
+    state exists (built by Train); otherwise from the v5 XGBoost blend.
+    The total comes from the Monte Carlo simulation.
     """
     d  = predict_detail(hd, ad, model, h_inj, a_inj)
     mc = d["mc"]
-    return (d["fp"], mc["spread_margin"], mc["median_total"], d["xgb_p"], d["mc_p"],
+    return (d["fp"], d["spread"], mc["median_total"], d["xgb_p"], d["mc_p"],
             d["conflict"], mc, d["hf"], d["af"])

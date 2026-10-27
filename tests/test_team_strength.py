@@ -76,3 +76,15 @@ def test_find_team_by_nickname():
     state = {"teams": {"1": {"name": "LA Clippers"}, "2": {"name": "Los Angeles Lakers"}}}
     assert ts.find_team(state, "Los Angeles Clippers")["name"] == "LA Clippers"
     assert ts.find_team(state, "Lakers")["name"] == "Los Angeles Lakers"
+
+
+def test_past_date_prediction_matches_replay_pre_game_state():
+    """Backtests ask about past dates: ratings must be the pre-game ones."""
+    raw = _logs()
+    g = ts.game_table(raw)
+    pre = ts.replay(g)
+    state = ts.build_state(raw, fit_seasons=["2025-26"])
+    i = len(g) // 2
+    row = g.iloc[i]
+    p = ts.predict(state, str(row.TEAM_ID_H), str(row.TEAM_ID_A), row.GAME_DATE)
+    assert p["exp_margin"] == pytest.approx(pre["EXP_MARGIN"].iloc[i], abs=1e-3)

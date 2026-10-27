@@ -79,6 +79,9 @@ def _fetch_new_games(status_cb=None) -> pd.DataFrame:
     df = pd.concat(all_games, ignore_index=True)
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"])
     df = df[df["WL"].isin(["W", "L"])]
+    # Regular season, playoffs and play-in only: preseason games used to slip
+    # through here and move live Elo and the calibrator.
+    df = df[df["GAME_ID"].astype(str).str.zfill(10).str[:3].isin(("002", "004", "005"))]
 
     home_df = df[df["MATCHUP"].str.contains(r"vs\.", na=False)].copy()
     away_df = df[df["MATCHUP"].str.contains("@", na=False)].copy()
@@ -170,7 +173,8 @@ def run_auto_backtest(model, status_cb=None, should_stop=None, progress_cb=None)
                 correct += 1
 
             elo_diff = hd.get("ELO", 1500) - ad.get("ELO", 1500)
-            calib_updates.append((xgb_p, mc_p, elo_diff, actual))
+            if xgb_p is not None:
+                calib_updates.append((xgb_p, mc_p, elo_diff, actual))
 
             csv_rows.append({
                 "GAME_ID":       row["GAME_ID"],
@@ -210,6 +214,14 @@ def run_auto_backtest(model, status_cb=None, should_stop=None, progress_cb=None)
 
     _append_to_csv(csv_rows)
     _save_log(processed_ids)
+
+    # Rebuild the team strength ratings from scratch so they include the new
+    # results (a full replay: no game can be counted twice).
+    try:
+        from engine import team_strength
+        team_strength.refresh(status_cb=report)
+    except Exception as e:
+        report(f"Team strength not refreshed: {e}")
 
     acc = correct / actual_processed if actual_processed > 0 else 0.0
     report(

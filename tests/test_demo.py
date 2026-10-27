@@ -91,7 +91,10 @@ def test_predict_in_demo_mode(demo_client):
     r = demo_client.post("/api/predict", json={"home_id": 1610612738, "away_id": PHX, "date": "2024-03-14"})
     d = r.json()
     assert d["game"]["result"] == {"home_score": 127, "away_score": 112}
-    assert "past_date_current_elo" in d["caveats"]
+    # team strength rates teams as of the game date, so no "current Elo" caveat
+    assert d["mode"] == "team_strength"
+    assert "past_date_current_elo" not in d["caveats"]
+    assert d["ratings"]["home"]["kalman"]["rating"] > d["ratings"]["away"]["kalman"]["rating"]
 
 
 def test_demo_form_and_odds(demo_client):
