@@ -49,6 +49,7 @@ PARAMS = dict(
     b2b0=1.0, v_b2b0=1.0, q_b2b=0.0,          # back-to-back penalty
     lineup0=0.0, v_lineup0=0.0, q_lineup=0.0,  # lineup covariate coefficient
     clip=np.inf,         # innovations clipped at clip·s (robust update)
+    sigma_po=1.0,        # playoff margin sd as a multiple of sigma
     # od mode only
     sigma_t=17.0,        # sd of the game total (points)
     mu0=100.0, v_mu0=25.0, q_mu=0.01,         # league scoring level per team
@@ -95,7 +96,7 @@ class KalmanRatings:
     update(...) with each final score.
     """
 
-    def __init__(self, teams, **params):
+    def __init__(self, teams, n_lineup=1, **params):
         p = {**PARAMS, **params}
         self.p = p
         self.od = p["mode"] == "od"
@@ -103,16 +104,20 @@ class KalmanRatings:
         self.ix = {t: i for i, t in enumerate(self.teams)}
         n = self.n = len(self.teams)
         nt = 2 * n if self.od else n                     # team-block size
-        self.g_home, self.g_b2b, self.g_lin = nt, nt + 1, nt + 2
-        self.g_mu = nt + 3 if self.od else None
-        m = nt + (4 if self.od else 3)
+        self.g_home, self.g_b2b = nt, nt + 1
+        self.g_lin = list(range(nt + 2, nt + 2 + n_lineup))
+        self.g_mu = nt + 2 + n_lineup if self.od else None
+        m = nt + 2 + n_lineup + int(self.od)
         so = p["off_share"]
         team_split = np.r_[np.full(n, so), np.full(n, 1 - so)] if self.od else np.ones(n)
+        ones = np.ones(n_lineup)
 
         self.x = np.zeros(m)
-        self.x[[self.g_home, self.g_b2b, self.g_lin]] = p["home0"], p["b2b0"], p["lineup0"]
-        var0 = np.r_[p["v0"] * team_split, p["v_home0"], p["v_b2b0"], p["v_lineup0"]]
-        qd = np.r_[p["q"] * team_split, p["q_home"], p["q_b2b"], p["q_lineup"]]
+        self.x[[self.g_home, self.g_b2b]] = p["home0"], p["b2b0"]
+        self.x[self.g_lin] = np.broadcast_to(p["lineup0"], (n_lineup,))
+        var0 = np.r_[p["v0"] * team_split, p["v_home0"], p["v_b2b0"],
+                     np.broadcast_to(p["v_lineup0"], (n_lineup,))]
+        qd = np.r_[p["q"] * team_split, p["q_home"], p["q_b2b"], p["q_lineup"] * ones]
         if self.od:
             self.x[self.g_mu] = p["mu0"]
             var0, qd = np.r_[var0, p["v_mu0"]], np.r_[qd, p["q_mu"]]
@@ -148,15 +153,17 @@ class KalmanRatings:
 
     # ── observation rows ──
     def _margin_row(self, h, a, neutral=0, b2b_h=0, b2b_a=0, lin_h=0.0, lin_a=0.0):
+        """lin_h / lin_a: lineup covariate(s) of each side (scalar or array)."""
         i, j, n = self.ix[h], self.ix[a], self.n
         idx = [i, j]
         cf = [1.0, -1.0]
         if self.od:
             idx += [n + i, n + j]
             cf += [1.0, -1.0]
-        idx += [self.g_home, self.g_b2b, self.g_lin]
-        cf += [1.0 - neutral, float(b2b_a - b2b_h), float(lin_h - lin_a)]
-        return np.array(idx), np.array(cf)
+        idx += [self.g_home, self.g_b2b] + self.g_lin
+        dl = np.broadcast_to(np.asarray(lin_h, float) - np.asarray(lin_a, float),
+                             (len(self.g_lin),))
+        return np.array(idx), np.r_[cf, 1.0 - neutral, float(b2b_a - b2b_h), dl]
 
     def _total_row(self, h, a):
         i, j, n = self.ix[h], self.ix[a], self.n
@@ -169,11 +176,14 @@ class KalmanRatings:
         return mu, var
 
     # ── public API ──
-    def predict(self, h, a, **cov):
+    def _sigma2(self, playoff):
+        return (self.p["sigma"] * (self.p["sigma_po"] if playoff else 1.0)) ** 2
+
+    def predict(self, h, a, playoff=0, **cov):
         """Pre-game (mean margin, predictive sd, sd of the state part,
         expected total or nan)."""
         mu, var = self._moments(*self._margin_row(h, a, **cov))
-        s = np.sqrt(var + self.p["sigma"] ** 2)
+        s = np.sqrt(var + self._sigma2(playoff))
         tot = self._moments(*self._total_row(h, a))[0] if self.od else np.nan
         return mu, s, np.sqrt(var), tot
 
@@ -191,9 +201,9 @@ class KalmanRatings:
         self.x += k * e
         self.P -= np.outer(k, Ph)
 
-    def update(self, h, a, margin, total=None, **cov):
+    def update(self, h, a, margin, total=None, playoff=0, **cov):
         """Measurement update with a final score (after the pre-game read)."""
-        self._update(*self._margin_row(h, a, **cov), margin, self.p["sigma"] ** 2)
+        self._update(*self._margin_row(h, a, **cov), margin, self._sigma2(playoff))
         if self.od and total is not None:
             self._update(*self._total_row(h, a), total, self.p["sigma_t"] ** 2)
 
@@ -220,16 +230,18 @@ def replay(games: pd.DataFrame, lineup=None, return_filter=False, **params):
     PRE-game prediction; the result only enters the state afterwards, and
     games of the same day never see each other.
 
-    lineup: optional (L_H, L_A) arrays aligned with games (pre-game lineup
-    strength).  Returns a DataFrame with MU, SD, SD_STATE, R_H, R_A, SD_H,
+    lineup: optional (L_H, L_A) arrays aligned with games, shape (n,) or
+    (n, k) for k covariates (pre-game lineup strength).  Returns a DataFrame with MU, SD, SD_STATE, R_H, R_A, SD_H,
     SD_A, HOME, TOTAL (and the filter if return_filter)."""
     teams = sorted(set(games["H"]) | set(games["A"]))
-    kf = KalmanRatings(teams, **params)
     n = len(games)
+    n_lin = 1 if lineup is None or np.ndim(lineup[0]) == 1 else lineup[0].shape[1]
+    kf = KalmanRatings(teams, n_lineup=n_lin, **params)
     H, A = games["H"].values, games["A"].values
     M = games["MARGIN"].values
     T = (games["PTS_H"] + games["PTS_A"]).values.astype(float)
     NEU, BH, BA = games["NEUTRAL"].values, games["B2B_H"].values, games["B2B_A"].values
+    PO = games["PLAYOFF"].values
     LH, LA = (np.zeros(n), np.zeros(n)) if lineup is None else lineup
     day, seas = games["DAY"].values, games["SEASON"].values
     out = np.full((n, 9), np.nan)
@@ -237,7 +249,8 @@ def replay(games: pd.DataFrame, lineup=None, return_filter=False, **params):
     for s, e in zip(starts[:-1], starts[1:]):
         kf.roll_season(seas[s])
         kf.advance(day[s])
-        covs = [dict(neutral=NEU[k], b2b_h=BH[k], b2b_a=BA[k], lin_h=LH[k], lin_a=LA[k])
+        covs = [dict(neutral=NEU[k], b2b_h=BH[k], b2b_a=BA[k], lin_h=LH[k], lin_a=LA[k],
+                     playoff=PO[k])
                 for k in range(s, e)]
         for k, cov in zip(range(s, e), covs):
             mu, sd, sds, tot = kf.predict(H[k], A[k], **cov)
