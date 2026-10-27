@@ -17,7 +17,8 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(paths, "SETTINGS_FILE", tmp_path / "settings.json")
     for var in (*SECRET_VARS, "NBA_QUANT_DEMO_DATE", "NBA_HOST", "NBA_PORT"):
-        monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv(var, "")   # records the original, so values set by code under test are undone
+        monkeypatch.delenv(var)
     return tmp_path
 
 

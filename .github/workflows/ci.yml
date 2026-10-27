@@ -17,8 +17,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
-        run: pip install -r requirements.txt pytest
+        run: pip install -r requirements.txt pytest httpx
       - name: Byte-compile
-        run: python -m compileall -q config.py engine data research nba_app.py optuna_tuner.py player_impact_updater.py
+        run: python -m compileall -q config.py engine data research server scripts nba_app.py optuna_tuner.py player_impact_updater.py
       - name: Tests
         run: python -m pytest -q

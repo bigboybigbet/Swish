@@ -18,7 +18,9 @@ def clean(obj):
     """Recursively convert to JSON-safe Python; non-finite floats become None."""
     if obj is None or isinstance(obj, (str, bool)):
         return obj
-    if isinstance(obj, (bool, np.bool_)):
+    if type(obj).__name__ in ("NAType", "NaTType"):   # pandas missing values (NaT is a datetime)
+        return None
+    if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, (int, np.integer)):
         return int(obj)
@@ -35,14 +37,8 @@ def clean(obj):
         return obj.isoformat()
     if isinstance(obj, PurePath):
         return str(obj)
-    # pandas scalars (Timestamp, NaT, NA) without importing pandas here
-    if hasattr(obj, "isoformat"):
-        try:
-            return obj.isoformat()
-        except ValueError:
-            return None
-    if type(obj).__name__ in ("NAType", "NaTType"):
-        return None
+    if hasattr(obj, "isoformat"):     # e.g. pandas Timestamp, without importing pandas
+        return obj.isoformat()
     if hasattr(obj, "item"):          # other numpy scalars
         return clean(obj.item())
     raise TypeError(f"not JSON serialisable: {type(obj).__name__}")
