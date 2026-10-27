@@ -73,7 +73,7 @@ PLAYER_PARAMS = dict(
     h_min=15.0,          # half-life (days) of the expected-minutes average
     km=3.0, m0=10.0,     # prior games / minutes of the expected-minutes average
     top=10,              # players per team counted in the lineup
-    gmsc_avg=0.3413,     # league Game Score per minute 2010-24
+    gmsc_avg=0.3176,     # league Game Score per minute 2010-11 … 2016-17
 )
 LINEUP_COLS = ["L_GMSC", "L_ONOFF"]
 
