@@ -186,7 +186,7 @@ def build_state(raw: pd.DataFrame, fit_seasons=None) -> dict:
 
 def save_state(state: dict, path: str = TEAM_STRENGTH_FILE):
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=1)
     os.replace(tmp, path)
 
@@ -194,7 +194,7 @@ def save_state(state: dict, path: str = TEAM_STRENGTH_FILE):
 def load_state(path: str = TEAM_STRENGTH_FILE) -> dict | None:
     if not os.path.exists(path):
         return None
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 

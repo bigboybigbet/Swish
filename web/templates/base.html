@@ -61,7 +61,7 @@
                          'status-yellow': $store.status.modelState === 'old',
                          'status-secondary': !['ok', 'old'].includes($store.status.modelState)}"></span>
           <span class="d-none d-xl-inline ms-2 small text-secondary"
-                x-text="{ok: 'Model ready', old: 'Model old', none: 'Elo only'}[$store.status.modelState] || ''"></span>
+                x-text="{ok: 'Kalman-Elo v6', old: 'Model old', none: 'Elo only'}[$store.status.modelState] || ''"></span>
         </a>
 
         {#- jobs tray (fed by Alpine.store('jobs')) #}
@@ -177,7 +177,7 @@
            x-show="$store.status.modelState === 'none' && !$store.banners.isDismissed('no-model')" x-cloak>
         <div class="d-flex align-items-center gap-2">
           <i class="ti ti-cpu fs-2" aria-hidden="true"></i>
-          <div>No trained model: showing Elo + Monte Carlo. <a href="/model" class="alert-link">Train (≈10 min) →</a></div>
+          <div>No team ratings yet: predictions use plain Elo. <a href="/model" class="alert-link">Train (a few minutes) →</a></div>
         </div>
         <button type="button" class="btn-close" aria-label="Hide for this session" @click="$store.banners.dismiss('no-model')"></button>
       </div>

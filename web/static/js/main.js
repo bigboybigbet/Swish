@@ -46,12 +46,15 @@ Alpine.store('status', {
   get modelState() {
     const m = this.data?.model;
     if (!m) return null;
+    if (this.data.team_strength?.exists) return 'ok';      // v6 Kalman-Elo drives predictions
     if (!m.exists) return 'none';
     return m.age_days != null && m.age_days > 7 ? 'old' : 'ok';
   },
   get modelTitle() {
     const m = this.data?.model;
     if (!m) return 'Model status loading';
+    const ts = this.data.team_strength;
+    if (ts?.exists) return `Kalman-Elo v6: ratings through ${ts.last_game_date} (${ts.n_games} games)`;
     if (!m.exists) return 'No trained model: Elo + Monte Carlo only';
     const age = m.age_days != null ? `${fmt.num(m.age_days, 0)} days ago` : 'date unknown';
     return `Model ${m.version} trained ${age}`;

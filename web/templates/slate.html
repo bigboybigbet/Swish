@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% from "_macros.html" import page_header, empty_state, skeleton, team_badge, prob_split_bar,
+                              confidence_badge, edge_badge, freshness, job_progress %}
+
+{% block page_module %}/static/js/pages/slate.js{% endblock %}
+
+{% block head %}
+<style>
+  .slate-card { transition: box-shadow .15s ease, transform .15s ease; }
+  .slate-card:hover { box-shadow: var(--tblr-box-shadow-card-hover, 0 .5rem 1rem rgba(0,0,0,.08)); transform: translateY(-1px); }
+  .slate-card .team-row { display: flex; align-items: center; gap: .5rem; }
+  .slate-card .team-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .slate-card .team-row .prob { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .slate-card .team-row .score { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 2.25rem; text-align: right; }
+  .slate-card .team-row.fav .name { font-weight: 600; }
+  .slate-card .prob-split { height: .5rem; }
+  .slate-card .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+  .slate-card .tile { background: var(--tblr-bg-surface-secondary); border-radius: var(--tblr-border-radius); padding: .4rem .5rem; }
+  .slate-card .tile .label { font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: var(--tblr-secondary); }
+  .slate-card .tile .val { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .slate-card.correct { border-left: 3px solid var(--tblr-green); }
+  .slate-card.incorrect { border-left: 3px solid var(--tblr-red); }
+  .kpi .h1 { font-variant-numeric: tabular-nums; }
+  .chips { display: flex; gap: .5rem; overflow-x: auto; scrollbar-width: none; }
+  .date-nav .date-label { min-width: 9.5rem; text-align: center; font-weight: 600; }
+  @media (max-width: 767.98px) {
+    .run-bar { position: sticky; bottom: 0; z-index: 10; background: var(--tblr-body-bg); padding: .75rem 0; }
+  }
+</style>
+{% endblock %}
+
+{% block page_header %}{{ page_header("Slate") }}{% endblock %}
+
+{% block content %}
+<div x-data="slatePage" x-cloak>
+
+  {#- top bar: date navigation, freshness, run button -#}
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="btn-group date-nav" role="group" aria-label="Date">
+      <button type="button" class="btn btn-icon" @click="shift(-1)" aria-label="Previous day" title="Previous day (←)">
+        <i class="ti ti-chevron-left" aria-hidden="true"></i></button>
+      <span class="btn date-label" x-text="$fmt.day(date)"></span>
+      <button type="button" class="btn btn-icon" @click="shift(1)" aria-label="Next day" title="Next day (→)">
+        <i class="ti ti-chevron-right" aria-hidden="true"></i></button>
+    </div>
+    <button type="button" class="btn btn-ghost-secondary" x-show="!isToday" @click="go($store.status.todayEt)">Today (ET)</button>
+    <span class="ms-1" x-show="asOf">{{ freshness("asOf", "stale", "Scoreboard") }}</span>
+    <span class="small text-secondary" x-show="scanAt" x-text="'· Predictions ' + $fmt.ago(scanAt)"></span>
+    <div class="ms-auto run-bar d-none d-md-block">
+      <button type="button" class="btn btn-primary" @click="run()" :disabled="!!job || !games.length">
+        <i class="ti ti-player-play me-1" aria-hidden="true"></i>
+        <span x-text="Object.keys(cards).length ? 'Re-run predictions' : 'Run predictions'"></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="mb-3" x-show="job">{{ job_progress("job") }}</div>
+
+  {#- KPI strip -#}
+  <div class="row row-cards mb-3 kpi" x-show="games.length">
+    <div class="col-6 col-lg-3"><div class="card card-sm"><div class="card-body">
+      <div class="subheader">Games</div><div class="h1 mb-0" x-text="kpi.games"></div>
+      <div class="small text-secondary" x-text="kpi.predicted + ' predicted'"></div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card card-sm"><div class="card-body">
+      <div class="subheader">VIP picks</div><div class="h1 mb-0 text-green" x-text="kpi.vip"></div>
+      <div class="small text-secondary">≥ 65%, engines agree</div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card card-sm"><div class="card-body">
+      <div class="subheader">Value spots</div><div class="h1 mb-0" x-text="kpi.value"></div>
+      <div class="small text-secondary">edge vs. the market</div>
+    </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card card-sm"><div class="card-body">
+      <div class="subheader">Picks correct</div>
+      <div class="h1 mb-0" x-text="kpi.graded ? kpi.correct + ' / ' + kpi.graded : '–'"></div>
+      <div class="small text-secondary" x-text="kpi.graded ? $fmt.pct(kpi.correct / kpi.graded) + ' of finished games' : 'after games finish'"></div>
+    </div></div></div>
+  </div>
+
+  {#- filters and sort -#}
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3" x-show="games.length">
+    <div class="chips" role="group" aria-label="Filter">
+      <template x-for="f in filters" :key="f">
+        <button type="button" class="btn btn-sm" :class="filter === f ? 'btn-primary' : 'btn-outline-secondary'"
+                @click="filter = f" :aria-pressed="filter === f">
+          <span x-text="{all: 'All', vip: 'VIP', value: 'Value', conflict: 'Engines disagree'}[f]"></span>
+          <span class="badge ms-1" :class="filter === f ? 'bg-white text-primary' : 'bg-secondary-lt'" x-text="count(f)"></span>
+        </button>
+      </template>
+    </div>
+    <div class="ms-auto d-flex align-items-center gap-2">
+      <label class="small text-secondary" for="slate-sort">Sort</label>
+      <select id="slate-sort" class="form-select form-select-sm w-auto" x-model="sort">
+        <option value="tipoff">Tip-off</option>
+        <option value="confidence">Confidence</option>
+        <option value="edge">Edge</option>
+      </select>
+    </div>
+  </div>
+
+  {#- states -#}
+  <template x-if="loading">{{ skeleton(6) }}</template>
+
+  <div class="alert alert-danger" role="alert" x-show="!loading && error">
+    <div class="d-flex align-items-center gap-2">
+      <span x-text="error"></span>
+      <button type="button" class="btn btn-sm btn-outline-danger ms-auto" @click="load()">Retry</button>
+    </div>
+  </div>
+
+  <div class="card" x-show="!loading && !error && !games.length">
+    <div class="card-body">
+      {% call empty_state("calendar-off", "No NBA games on this date", "Use ‹ › or the arrow keys to move between days.") %}{% endcall %}
+    </div>
+  </div>
+
+  <div class="text-secondary small mb-2" x-show="!loading && games.length && filter !== 'all' && !rows.length">
+    No games match this filter.
+  </div>
+
+  {#- game cards -#}
+  <div class="row row-cards" x-show="!loading">
+    <template x-for="r in rows" :key="r.g.event_id">
+      <div class="col-12 col-md-6 col-xl-4">
+        <a class="card slate-card text-reset text-decoration-none h-100" :href="gameHref(r.g)"
+           :class="{correct: r.correct === true, incorrect: r.correct === false}">
+          <div class="card-body">
+            {#- status line -#}
+            <div class="d-flex align-items-center gap-2 small text-secondary mb-2">
+              <span x-text="r.final ? 'Final' : (r.g.status === 'in' ? 'In progress' : tipoffText(r.g))"></span>
+              <span class="badge bg-red-lt" x-show="r.g.status === 'in'">Live</span>
+              <span class="ms-auto"></span>
+              <span class="badge bg-green text-green-fg" x-show="r.vip" title="≥ 65% and both engines agree">
+                <i class="ti ti-star-filled" aria-hidden="true"></i> VIP</span>
+              {{ confidence_badge("r.c?.pick?.tier") }}
+              <span class="badge bg-orange-lt" x-show="r.conflict" title="The rating model and the simulation pick different winners">Engines disagree</span>
+              <span class="badge" x-show="r.correct != null"
+                    :class="r.correct ? 'bg-green-lt' : 'bg-red-lt'" x-text="r.correct ? 'Correct' : 'Missed'"></span>
+            </div>
+
+            {#- team rows: away on top, home below -#}
+            <template x-for="side in ['away', 'home']" :key="side">
+              <div class="team-row mb-1" :class="{fav: r.favourite && r.favourite.id === r.g[side].id}">
+                {{ team_badge("r.g[side]") }}
+                <span class="name">
+                  <span x-text="r.g[side].name"></span>
+                  <span class="text-secondary small" x-show="side === 'home'"> (home)</span>
+                  <span class="badge bg-red-lt ms-1" x-show="r.c?.injured_out?.[side]"
+                        :title="r.c?.injured_out?.[side] + ' player(s) out'">
+                    <i class="ti ti-first-aid-kit" aria-hidden="true"></i><span x-text="r.c?.injured_out?.[side]"></span>
+                  </span>
+                </span>
+                <span class="score" x-show="r.final || r.g.status === 'in'" x-text="r.g[side].score ?? ''"></span>
+                <span class="prob" x-text="probText(r, side)"></span>
+              </div>
+            </template>
+
+            <div class="my-2" x-show="r.pHome != null">{{ prob_split_bar("r.g.home", "r.g.away", "r.pHome") }}</div>
+            <div class="progress prob-split my-2" x-show="r.pHome == null"><div class="progress-bar bg-secondary-lt" style="width:100%"></div></div>
+
+            {#- tiles -#}
+            <div class="tiles mb-2">
+              <div class="tile">
+                <div class="label">Spread</div>
+                <div class="val" x-text="spreadText(r)"></div>
+                <div class="small text-secondary" x-show="marketSpread(r)" x-text="'Mkt ' + marketSpread(r)"></div>
+              </div>
+              <div class="tile">
+                <div class="label">Total</div>
+                <div class="val" x-text="r.c?.total != null ? $fmt.num(r.c.total) : '–'"></div>
+                <div class="small text-secondary" x-show="(r.c?.market?.total ?? r.g.market?.total) != null"
+                     x-text="'Mkt ' + $fmt.num(r.c?.market?.total ?? r.g.market?.total)"></div>
+              </div>
+              <div class="tile">
+                <div class="label">Rating</div>
+                <div class="val" x-text="r.c?.ratings?.home ? $fmt.signed(r.c.ratings.away.rating) + ' / ' + $fmt.signed(r.c.ratings.home.rating) : '–'"></div>
+                <div class="small text-secondary" x-show="r.c?.ratings?.home">away / home</div>
+              </div>
+            </div>
+
+            {#- market line -#}
+            <div class="small d-flex flex-wrap align-items-center gap-2">
+              <template x-if="r.c?.market?.home_ml != null">
+                <span class="text-secondary">
+                  Market <span x-text="r.g.away.abbr + ' ' + $fmt.odds(r.c.market.away_ml, $store.prefs.odds)"></span>
+                  · <span x-text="r.g.home.abbr + ' ' + $fmt.odds(r.c.market.home_ml, $store.prefs.odds)"></span>
+                </span>
+              </template>
+              <span class="text-secondary" x-show="r.c && !r.c.error && r.c?.market?.home_ml == null">No market yet: model only</span>
+              <span class="text-secondary" x-show="!r.c">Not predicted yet</span>
+              <span class="text-danger" x-show="r.c?.error" x-text="r.c?.error"></span>
+              <span class="ms-auto">{{ edge_badge("r.edge", "r.valueTeam ? 'Value: ' + r.valueTeam.abbr : ''") }}</span>
+            </div>
+          </div>
+        </a>
+      </div>
+    </template>
+  </div>
+
+  {#- mobile: sticky run button -#}
+  <div class="run-bar d-md-none mt-3" x-show="games.length">
+    <button type="button" class="btn btn-primary w-100" @click="run()" :disabled="!!job">
+      <i class="ti ti-player-play me-1" aria-hidden="true"></i>
+      <span x-text="Object.keys(cards).length ? 'Re-run predictions' : 'Run predictions'"></span>
+    </button>
+  </div>
+</div>
+{% endblock %}
