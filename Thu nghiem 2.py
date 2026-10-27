@@ -1,0 +1,11 @@
+def menu():
+    print("====MENU====")
+    print("1. Them hoc sinh")
+    print("2. Them giao vien")
+    print("3. Them nhan vien")
+    print("4. In danh sach hoc sinh")
+    print("5. In danh sach giao vien")
+    print("6. In danh sach nhan vien")
+    print("7. In tat ca")
+    print("8. Exit")
+    choice = input("Moi chon tu 1 den 8: ")

@@ -15,3 +15,8 @@ elo_ratings.json
 nba_blend_calibrator.json
 autobacktest_log.json
 optuna_best_params.json
+
+# Binary/downloaded files (regenerable, kept out of the repo)
+vama_pdfs/
+*.xlsx
+*.db
