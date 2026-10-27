@@ -1,16 +1,35 @@
 """
 learners — model class, regularization and calibration on the v5 features.
 
-build_dataset: production v5 features plus the pieces the live Monte Carlo
-uses (10-game std of points scored / allowed per team, shift(1) like every
-other rolling stat) so the analytic MC probability can be tested as a blend
-component.  fit_predict is filled in below.
+The 17 production features add little beyond ELO_DIFF, and the v5
+RandomizedSearch XGBoost overfits them.  This variant keeps the features and
+replaces the learner with an equal logit-average of two heavily regularized
+models, both anchored on Elo:
+
+  • L2 logistic regression on the standardized features (C = 0.03);
+  • a shallow monotone LightGBM boosted on top of a fitted Elo logistic
+    (init score = a + b*ELO_DIFF): 4 leaves, lr 0.02, min 200 games per
+    leaf, L2 10, monotone in every *_DIFF / B2B / venue feature, trees
+    chosen by early stopping on the last 20% of the train frame (time
+    order), then refit on the whole frame.
+
+No extra calibration layer: Platt on a held-out slice was neutral and
+isotonic hurt (dev).  All choices were made on the dev window
+(2014-15 … 2016-17); see the result notes for the numbers.
+
+build_dataset also adds the 10-game score SDs used by the live Monte Carlo
+and its analytic probability MC_P, so the production blend can be measured.
+The ensemble itself uses only config.FEATURE_COLS.
 """
 import os
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from config import FEATURE_COLS, HOME_ADV, MC_CORR
 from research.benchmark import CACHE_DIR, baseline_dataset
@@ -19,6 +38,26 @@ VERSION = 1   # bump to invalidate the research/cache file
 _VALID = ("002", "004", "005")
 _NEEDED = ["PLUS_MINUS", "PTS", "FGM", "FGA", "FG3M",
            "FTA", "AST", "TOV", "REB", "OREB", "DREB", "WL"]
+
+LR_C = 0.03
+GBM_PARAMS = {
+    "objective": "binary", "learning_rate": 0.02, "num_leaves": 4,
+    "min_child_samples": 200, "reg_lambda": 10.0, "colsample_bytree": 0.7,
+    "subsample": 0.8, "subsample_freq": 1, "n_jobs": 1, "verbose": -1,
+    "random_state": 0,
+}
+GBM_VAL_FRAC = 0.2
+GBM_PATIENCE = 100
+GBM_MAX_TREES = 3000
+
+# +1: larger value favours the home team, -1: favours the away team, 0: free
+MONOTONE = {
+    "ELO_DIFF": 1, "NET5_DIFF": 1, "NET15_DIFF": 1, "PTS10_DIFF": 1,
+    "PA10_DIFF": -1, "EFG10_DIFF": 1, "TOV10_DIFF": -1, "ORB10_DIFF": 1,
+    "FTR10_DIFF": 1, "PACE10_MEAN": 0, "WPCT10_DIFF": 1, "STREAK_DIFF": 1,
+    "REST_DIFF": 1, "H_B2B": -1, "A_B2B": 1, "H_HOME_WPCT": 1,
+    "A_AWAY_WPCT": -1,
+}
 
 
 # ── dataset ───────────────────────────────────────────────────────────────────
@@ -72,5 +111,55 @@ def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# ── model ─────────────────────────────────────────────────────────────────────
+
+class EloAnchoredEnsemble:
+    """Logit-average of an L2 logistic and an Elo-initialized monotone GBM.
+    Fit on time-ordered matchup rows; predicts P(home win)."""
+
+    def __init__(self, features=FEATURE_COLS):
+        self.features = list(features)
+
+    @staticmethod
+    def _elo_logit(frame: pd.DataFrame):
+        m = LogisticRegression(C=1e6).fit(frame[["ELO_DIFF"]], frame["RESULT"])
+        return lambda d: m.decision_function(d[["ELO_DIFF"]])
+
+    def _gbm(self, n_trees: int) -> lgb.LGBMClassifier:
+        mono = [MONOTONE.get(c, 0) for c in self.features]
+        return lgb.LGBMClassifier(n_estimators=n_trees, monotone_constraints=mono,
+                                  **GBM_PARAMS)
+
+    def fit(self, df: pd.DataFrame) -> "EloAnchoredEnsemble":
+        df = df.sort_values("GAME_DATE")
+        X, y = df[self.features], df["RESULT"]
+        self.lr = make_pipeline(StandardScaler(),
+                                LogisticRegression(C=LR_C, max_iter=2000)).fit(X, y)
+
+        # number of trees: early stopping on the most recent slice
+        n = int(len(df) * (1 - GBM_VAL_FRAC))
+        a, b = df.iloc[:n], df.iloc[n:]
+        off = self._elo_logit(a)
+        es = self._gbm(GBM_MAX_TREES).fit(
+            a[self.features], a["RESULT"], init_score=off(a),
+            eval_set=[(b[self.features], b["RESULT"])], eval_init_score=[off(b)],
+            callbacks=[lgb.early_stopping(GBM_PATIENCE, verbose=False)])
+        self.n_trees = max(int(es.best_iteration_ or 1), 1)
+
+        self.offset = self._elo_logit(df)
+        self.gbm = self._gbm(self.n_trees).fit(X, y, init_score=self.offset(df))
+        return self
+
+    def decision_function(self, df: pd.DataFrame) -> np.ndarray:
+        X = df[self.features]
+        z_lr = self.lr.decision_function(X)
+        z_gb = self.gbm.predict(X, raw_score=True) + self.offset(df)
+        return (z_lr + z_gb) / 2
+
+    def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
+        p = 1 / (1 + np.exp(-self.decision_function(df)))
+        return np.c_[1 - p, p]
+
+
 def fit_predict(train: pd.DataFrame, test: pd.DataFrame) -> np.ndarray:
-    raise NotImplementedError
+    return EloAnchoredEnsemble().fit(train).predict_proba(test)[:, 1]
