@@ -200,6 +200,8 @@ class PlayerElo:
         (box_line @ GAME_SCORE); unused_*: rows of players who dressed but
         did not play.  Returns the expected margin given minutes."""
         p = self.p
+        if min_h.sum() <= 0 or min_a.sum() <= 0:
+            return np.nan                          # incomplete box score
         j = np.concatenate([jh, ja])
         mins = np.concatenate([min_h, min_a])
         sh, sa = 5 * min_h / min_h.sum(), 5 * min_a / min_a.sum()
@@ -255,7 +257,7 @@ class PlayerElo:
         for t, u in ((home, unused_h), (away, unused_a)):
             if len(u):
                 self.ea[u] -= self._a_min * self.ea[u]
-                self.team[u] = t
+                self.team[u], self.last_day[u] = t, day
         self.n[jj] += 1
         self.team[jh], self.team[ja] = home, away
         self.last_day[j] = day
