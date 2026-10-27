@@ -23,10 +23,12 @@ MANIP_DAYS = 5          # seeding manipulation: last N days of the season
 MANIP_GAIN = 0.02       # bracket value (exp. series wins) gained by losing
 
 
-def model_sets(incentive=None):
+def model_sets(incentive=None, full=None):
     i = incentive or inc.INCENTIVE
+    f = full or inc.FULL_INCENTIVE
     return {"base": inc.BASE, "base+inc": inc.BASE + i,
-            "base+who": inc.BASE + inc.WHO, "base+who+inc": inc.BASE + inc.WHO + i}
+            "base+who": inc.BASE + inc.WHO, "base+who+inc": inc.BASE + inc.WHO + i,
+            "base+full": inc.BASE + f, "base+who+full": inc.BASE + inc.WHO + f}
 
 
 def predict_all(df, seasons, sets, c=inc.C):
@@ -68,7 +70,8 @@ def compare(t, mask, a, b):
 def subset_table(t):
     rows = []
     for name, m in subset_masks(t).items():
-        for a, b in (("base", "base+inc"), ("base+who", "base+who+inc"), ("base", "base+who")):
+        for a, b in (("base", "base+inc"), ("base+who", "base+who+inc"), ("base", "base+who"),
+                     ("base", "base+full"), ("base+who", "base+who+full")):
             r = compare(t, m, a, b)
             rows.append({"subset": name, "pair": f"{b} vs {a}", "n": r["n"],
                          "ll_a": r[f"ll_{a}"], "ll_b": r[f"ll_{b}"],

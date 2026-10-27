@@ -19,9 +19,15 @@ pre-game: results before the game's date only, future fixtures allowed):
 Who-plays control (incentives_rotation): share of the team's top-5 recent-
 minutes players who sit tonight.
 
-fit_predict: L2 logistic regression on the base features plus a few home-
-minus-away incentive features (all zero in the playoffs).  Feature sets
-are module constants so the eval script can switch them.
+fit_predict: logistic regression (standardised, L2 C=1) on the base
+features plus home-minus-away incentive features (all zero in playoffs).
+
+Chosen on the dev window (2014-15..2016-17): a single feature,
+D_STAKE_LATE = (stake_home - stake_away) when either team has <= 20 games
+left, else 0, where stake = P(postseason | W) - P(postseason | L) +
+same for top-4 seed + same for the 1 seed.  Full-season stake, the tank
+incentive and the rest / dead flags added nothing on dev (FULL_INCENTIVE is
+reported as a pre-declared secondary set, not selected).
 """
 import numpy as np
 import pandas as pd
@@ -35,10 +41,11 @@ from research.variants.incentives_standings import pregame_standings, regular_se
 
 BASE = ["ADJ_PRED", "H_B2B", "A_B2B"]
 WHO = ["D_MISS5"]
-INCENTIVE = ["D_STAKE", "D_TANK", "D_REST"]
+INCENTIVE = ["D_STAKE_LATE"]
+FULL_INCENTIVE = ["D_STAKE_LATE", "D_TANK_LATE", "D_REST"]
 FEATURES = BASE + INCENTIVE
 C = 1.0
-LATE_GAMES = 15          # "late season": team has at most this many games left
+LATE_GAMES = 20          # "late season": team has at most this many games left
 NO_STAKE = 0.01          # stake below this = nothing left to play for
 
 
@@ -78,6 +85,7 @@ def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     late = ((df["LATE_H"] + df["LATE_A"]) > 0).astype(float)
     df["D_STAKE_LATE"] = df["D_STAKE"] * late
     df["D_TANK_LATE"] = df["D_TANK"] * late
+    df["D_POST_LATE"] = (df["LEV_POST_H"] - df["LEV_POST_A"]).fillna(0.0) * late
     return df.sort_values(["GAME_DATE", "GAME_ID"]).reset_index(drop=True)
 
 
