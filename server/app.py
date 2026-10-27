@@ -55,7 +55,7 @@ def create_app(host: str | None = None, port: int | None = None) -> FastAPI:
                 mod.on_shutdown(app)
 
     app = FastAPI(
-        title="NBA Quant", version=__version__, lifespan=lifespan,
+        title="Swish", version=__version__, lifespan=lifespan,
         default_response_class=SafeJSONResponse,
         docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json",
     )

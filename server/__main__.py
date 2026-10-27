@@ -26,7 +26,7 @@ def main(argv=None):
     from server import clock, config_store, paths, security  # noqa: F401  (paths: mimetypes fix)
 
     env_host, env_port = config_store.server_address()       # reads .env
-    ap = argparse.ArgumentParser(prog="python -m server", description="NBA Quant web app")
+    ap = argparse.ArgumentParser(prog="python -m server", description="Swish web app")
     ap.add_argument("--host", default=env_host, help=f"bind address (default {env_host})")
     ap.add_argument("--port", type=int, default=env_port, help=f"port (default {env_port})")
     ap.add_argument("--reload", action="store_true", help="auto-reload on code changes (dev)")
@@ -48,7 +48,7 @@ def main(argv=None):
 
     browse_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     url = f"http://{browse_host}:{args.port}"
-    print(f"NBA Quant at {url}" + (f"  (demo mode: replaying {demo})" if demo else ""))
+    print(f"Swish at {url}" + (f"  (demo mode: replaying {demo})" if demo else ""))
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, [url]).start()
 

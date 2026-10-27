@@ -50,4 +50,4 @@ def send(text: str, parse_mode: str | None = "HTML") -> tuple:
 
 def send_test() -> tuple:
     now = clock.now_et().strftime("%Y-%m-%d %H:%M ET")
-    return send(f"🏀 <b>NBA Quant</b>: connection test ✅\n<i>{escape(now)}</i>")
+    return send(f"🏀 <b>Swish</b>: connection test ✅\n<i>{escape(now)}</i>")

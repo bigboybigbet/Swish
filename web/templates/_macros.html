@@ -22,11 +22,11 @@
 ] -%}
 
 {% macro page_label(page) -%}
-{%- for p in PAGES if p.key == page %}{{ p.label }}{% else %}NBA Quant{% endfor -%}
+{%- for p in PAGES if p.key == page %}{{ p.label }}{% else %}Swish{% endfor -%}
 {%- endmacro %}
 
 {#- Tabler page header; optional actions via {% call page_header(...) %}…{% endcall %} -#}
-{% macro page_header(title, pretitle="NBA Quant") -%}
+{% macro page_header(title, pretitle="Swish") -%}
 <div class="page-header d-print-none">
   <div class="container-xl">
     <div class="row g-2 align-items-center">
