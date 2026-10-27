@@ -22,7 +22,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
 from research.benchmark import CACHE_DIR, DEFAULT_DATA_DIR, load_history
-from research.variants.player_elo_engine import BOX_STATS, prepare, replay
+from research.variants.player_elo_engine import prepare, replay
 
 NAME = "player_elo"
 FEATURES = ["PE_DIFF"]
@@ -42,9 +42,9 @@ _BOX_COLS = {
 # ── data ──────────────────────────────────────────────────────────────────────
 
 def _minutes(s: pd.Series) -> np.ndarray:
-    """'MM:SS' (or empty for DNP) → float minutes."""
+    """'MM:SS' / 'MM.000000:SS' (or empty for DNP) → float minutes."""
     s = s.fillna("").astype(str)
-    mm = s.str.extract(r"^(\d+):(\d+)")
+    mm = s.str.extract(r"^(\d+)(?:\.\d+)?:(\d+)")
     out = mm[0].astype(float) + mm[1].astype(float) / 60
     plain = pd.to_numeric(s.where(mm[0].isna()), errors="coerce")
     return out.fillna(plain).fillna(0.0).values
@@ -130,6 +130,7 @@ SIGNAL_COLS = {
     "PE_SD": "sd",                # predictive sd of the margin
     "PE_H": "home_strength",      # home side, points vs an average team
     "PE_A": "away_strength",
+    "PE_LIVE_DIFF": "live_diff",  # same from the active roster (live inputs)
     "PE_FULL_DIFF": "full_diff",  # same with every recent regular available
     "PE_ABSENCE": "absence",      # diff - full_diff: net effect of absences
     "PE_IMP": "impact_diff",      # plus-minus / Elo part of diff
@@ -159,12 +160,13 @@ def build_engine(raw: pd.DataFrame = None, until=None, **params):
     """Engine state after every game before `until` (a date; None = all)."""
     prep = prepared(raw)
     if until is not None:
-        keep = prep["games"]["GAME_DATE"] < pd.Timestamp(until)
-        n = int(keep.sum())
-        cut = prep["ptr"][2 * n]
-        prep = {**prep, "games": prep["games"].iloc[:n], "ptr": prep["ptr"][:2 * n + 1],
+        n = int((prep["games"]["GAME_DATE"] < pd.Timestamp(until)).sum())
+        cut, ucut = prep["ptr"][2 * n], prep["uptr"][2 * n]
+        prep = {"games": prep["games"].iloc[:n],
+                "ptr": prep["ptr"][:2 * n + 1], "uptr": prep["uptr"][:2 * n + 1],
                 **{k: prep[k][:n] for k in ("day", "season", "home", "away", "margin")},
-                **{k: prep[k][:cut] for k in ("pid", "name", "min", "pm", "box")}}
+                **{k: prep[k][:cut] for k in ("pid", "name", "min", "pm", "box")},
+                **{k: prep[k][:ucut] for k in ("upid", "uname")}}
     _, eng = replay(prep, **params)
     return eng
 
@@ -183,14 +185,18 @@ STATUS_PLAY_PROB = {"out": 0.0, "doubtful": 0.15, "questionable": 0.5,
 
 
 def live_prediction(eng, home, away, home_roster, away_roster,
-                    injuries: dict = None, game_date=None) -> dict:
+                    injuries: dict = None, season: str = None) -> dict:
     """Pre-game prediction for an upcoming game from a live engine.
 
-    home_roster / away_roster: player ids on each roster (e.g. eng.roster()
-    or nba_api commonteamroster); injuries: {player_id: ESPN status}.
-    Players ruled out drop out, the rest are weighted by their chance to
-    play; the team strengths are re-normalised to 240 minutes."""
+    home_roster / away_roster: player ids on each active roster (e.g.
+    eng.roster(team, since_day) or nba_api commonteamroster); injuries:
+    {player_id: ESPN status}.  Players ruled out drop out, the rest are
+    weighted by their chance to play, and minutes are re-normalised to 240.
+    Returns margin, sd, hfa, both sides and `absence` (margin lost to the
+    injury report)."""
     injuries = injuries or {}
+    if season is not None and season != eng.season:
+        eng.new_season(season)                 # offseason regression first
 
     def avail(roster):
         ids = [p for p in roster if STATUS_PLAY_PROB.get(
@@ -204,3 +210,33 @@ def live_prediction(eng, home, away, home_roster, away_roster,
     full = eng.predict(home, away, list(home_roster), list(away_roster))
     out["absence"] = out["margin"] - full["margin"]
     return out
+
+
+# nba_api boxscoretraditionalv2 PlayerStats → engine columns
+_LIVE_COLS = {"TO": "TOV", "PLUS_MINUS": "PM"}
+
+
+def update_from_box(eng, home, away, margin, players: pd.DataFrame, day: int,
+                    season: str = None):
+    """Feed one finished game to a live engine.  `players`: the game's
+    player rows from nba_api boxscoretraditionalv2 (PLAYER_ID, PLAYER_NAME,
+    TEAM_ID, MIN, COMMENT, PTS, FGM, FGA, FTM, FTA, OREB, DREB, AST, STL,
+    BLK, TO, PF, PLUS_MINUS); day = days since 2000-01-01."""
+    from research.variants.player_elo_engine import BOX_STATS, GAME_SCORE
+    if season is not None and season != eng.season:
+        eng.new_season(season)
+    b = players.rename(columns=_LIVE_COLS).copy()
+    b["MIN"] = _minutes(b["MIN"])
+    args = []
+    for t in (home, away):
+        side = b[b["TEAM_ID"] == t]
+        on = side[side["MIN"] > 0].sort_values("MIN", ascending=False)
+        unused = side[(side["MIN"] <= 0) & side["COMMENT"].fillna("")
+                      .str.startswith("DNP - Coach")]
+        args.append((eng.rows(on["PLAYER_ID"].tolist(), on["PLAYER_NAME"].tolist()),
+                     on["MIN"].values.astype(float), on["PM"].values.astype(float),
+                     on[BOX_STATS].fillna(0).values.astype(float) @ GAME_SCORE,
+                     eng.rows(unused["PLAYER_ID"].tolist(), unused["PLAYER_NAME"].tolist())))
+    (jh, mh, ph, bh, uh), (ja, ma, pa, ba, ua) = args
+    return eng.update(home, away, float(margin), jh, ja, mh, ma, ph, pa, bh, ba,
+                      day, uh, ua)

@@ -2,37 +2,41 @@
 Rating engine for the player_elo variant: Elo for players, on the point scale.
 
 Every player i carries
-    r_i   impact rating, points of team margin per 48 on-court minutes above an
-          average player (five +2 players make a +10 team),
-    P_i   variance of r_i (the Kalman "K": big for new players, small for
-          veterans, widened at each new season),
-    b_i   box rating: decayed per-48 Game Score, shrunk toward the current
-          league average (and toward a replacement-level offset for new
-          players),
-    em_i  expected minutes, an EWMA of the minutes he played in past games.
+    r_i   impact rating (points of team margin per 48 on-court minutes),
+    P_i   its variance: the Kalman "K".  New players start wide (fast moves),
+          every game shrinks it (veterans move slowly), q per game and
+          v_season per offseason widen it again,
+    box_i box rating: gamma * decayed per-48 Game Score above the current
+          league average, shrunk over box_prior minutes, plus a decaying
+          replacement-level offset for players who debut,
+    em_i  expected minutes if he plays (EWMA over games played),
+    ea_i  expected minutes if he dresses (same EWMA, 0 for an unused game);
+          the live app only knows the active roster, so it uses ea.
 
-Pre-game, from the players who will play (w_i = expected share, sum 5):
+Pre-game, from the players available (R_i = r_i + box_i, Rbar = league
+minute-weighted mean of R):
 
-    w_i       = 5 * em_i^a / sum_team(em^a)
-    R_i       = r_i + gamma * b_i                 (full rating, pts / 48)
-    E[margin] = hfa + sum_home w R - sum_away w R
-    sd        = sqrt(sigma^2 + sum w^2 P)
+    w_i       = 5 * em_i^a / sum_team(em^a)              (shares, sum 5)
+    T_team    = sum_i w_i (R_i - Rbar)       (points vs an average team)
+    E[margin] = hfa + T_home - T_away
+    sd        = sqrt(sigma^2 + sum_i w_i^2 P_i)
 
 After the game, with the minutes actually played (h_i = 5 * min_i / team
 minutes, negative for the away side):
   1. team margin, Kalman with a diagonal covariance:
        e = clip(M, ±cap) - E[margin | h],   S = sigma^2 + sum h^2 P
        r_i += P_i h_i e / S,   P_i -= (P_i h_i)^2 / S
-     so the error is split in proportion to minutes and uncertainty;
+     i.e. the error is split in proportion to minutes, with K_i = P_i / S;
   2. on-court plus-minus, within team: with f_i the share of the game on
-     court, d_i = PM_i - f_i M_team has mean f_i (1 - f_i)(R_i - Rbar_-i), so
+     court, d_i = PM_i - f_i M_team has mean f_i (1 - f_i)(R_i - Rbar_-i)
+     (Rbar_-i = teammates' minute-weighted mean), so
        r_i += P_i (d_i - E d_i) / (f_i (1 - f_i) P_i + sigma_pm^2)
      re-centred so the team's minute-weighted total is unchanged;
   3. box rating, expected minutes and counters are refreshed; P_i += q.
 
-At a new season: r *= carry (toward the mean), P += v_season (capped at
-p_max), box evidence *= box_carry.  Unseen players start at a
-replacement-level prior (r0 < 0 and a negative box offset b0).
+At a new season: r *= carry (partial regression toward the mean),
+P += v_season (capped at p_max), box evidence *= box_carry.  Unseen players
+start at a replacement-level prior (r0 < 0, box offset gamma * b0 < 0).
 """
 import pickle
 
@@ -70,7 +74,7 @@ PARAMS = dict(
     team_carry=0.5,   # share of the team effect kept at a new season
 )
 
-_ARRAYS = ("r", "P", "n", "em", "bn", "bd", "off", "ns", "known", "team",
+_ARRAYS = ("r", "P", "n", "em", "ea", "bn", "bd", "off", "ns", "known", "team",
            "last_day")
 
 
@@ -85,7 +89,8 @@ class PlayerElo:
         self.r = np.zeros(cap)              # impact rating (pts / 48)
         self.P = np.zeros(cap)              # variance of r
         self.n = np.zeros(cap)              # games played
-        self.em = np.zeros(cap)             # expected minutes
+        self.em = np.zeros(cap)             # expected minutes if he plays
+        self.ea = np.zeros(cap)             # expected minutes if he dresses
         self.bn = np.zeros(cap)             # decayed Game Score sum
         self.bd = np.zeros(cap)             # decayed minutes
         self.off = np.zeros(cap)            # replacement offset (pts / 48)
@@ -96,6 +101,7 @@ class PlayerElo:
         self.tr, self.tP = {}, {}           # team effects and variances
         self.hfa = p["hfa"]
         self.xm = 0.0                       # league Game Score per 48
+        self.rmean = 0.0                    # league minute-weighted mean of R
         self.season, self.n_seasons, self.n_games = None, 0, 0
         self._a_min = 1 - 0.5 ** (1 / p["min_hl"])
         self._a_box = 0.5 ** (1 / p["box_hl"])
@@ -125,7 +131,7 @@ class PlayerElo:
         self.r[j] = p["r0"] if debut else 0.0
         self.P[j] = p["p0"] if debut else p["p_max"]
         self.n[j], self.bd[j], self.bn[j] = 0, 0.0, 0.0
-        self.em[j] = p["new_min"] if debut else 2 * p["new_min"]
+        self.em[j] = self.ea[j] = p["new_min"] if debut else 2 * p["new_min"]
         self.off[j] = p["gamma"] * p["b0"] if debut else 0.0
         self.ns[j], self.known[j] = 0, debut
         self.team[j], self.last_day[j] = 0, -10 ** 6
@@ -142,11 +148,13 @@ class PlayerElo:
         """Full player rating R = r + box (points / 48)."""
         return self.r[j] + self.box(j)
 
-    def weights(self, j, minutes=None, play_prob=None) -> np.ndarray:
+    def weights(self, j, minutes=None, play_prob=None, dressed=False) -> np.ndarray:
         """Minute shares summing to 5 (five on court).  Without explicit
-        minutes, each player's recent average is used, raised to min_pow;
-        play_prob (0..1 per player, from an injury report) scales it."""
-        m = self.em[j] ** self.p["min_pow"] if minutes is None \
+        minutes, each player's recent average (if he plays, or if he dresses
+        when `dressed`) is used, raised to min_pow; play_prob (0..1 per
+        player, from an injury report) scales it."""
+        em = self.ea if dressed else self.em
+        m = em[j] ** self.p["min_pow"] if minutes is None \
             else np.asarray(minutes, float)
         if play_prob is not None:
             m = m * np.asarray(play_prob, float)
@@ -154,39 +162,46 @@ class PlayerElo:
         return 5 * m / s if s > 0 else np.full(len(j), 5 / max(len(j), 1))
 
     # ── pre-game ─────────────────────────────────────────────────────────────
-    def side(self, j, team=None, minutes=None, play_prob=None) -> dict:
+    def side(self, j, team=None, minutes=None, play_prob=None,
+             dressed=False) -> dict:
         """Strength of one side from internal rows j (see team_strength)."""
-        w = self.weights(j, minutes, play_prob)
+        w = self.weights(j, minutes, play_prob, dressed)
         imp, box = float(w @ self.r[j]), float(w @ self.box(j))
         t = self.tr.get(team, 0.0)
         var = float(w ** 2 @ self.P[j] + self.tP.get(team, 0.0))
-        return {"strength": imp + box + t, "impact": imp, "box": box,
-                "team": t, "var": var}
+        # strength is centred on the league-average player (5 * rmean)
+        return {"strength": imp + box + t - 5 * self.rmean, "impact": imp,
+                "box": box, "team": t, "var": var}
 
-    def team_strength(self, team, players, minutes=None, play_prob=None) -> dict:
+    def team_strength(self, team, players, minutes=None, play_prob=None,
+                      dressed=True) -> dict:
         """Strength (points vs an average team) of `team` with an arbitrary
         set of available players.  Expected minutes default to each player's
         recent average rescaled to 240 minutes; this is how injuries and rest
         enter: leave out players ruled out, give doubtful / questionable
-        players a play_prob below 1."""
-        return self.side(self.rows(players), team, minutes, play_prob)
+        players a play_prob below 1.  `dressed=True` (live default) treats
+        `players` as the active roster, False as the players known to play."""
+        return self.side(self.rows(players), team, minutes, play_prob, dressed)
 
     def predict(self, home, away, home_players, away_players,
-                home_prob=None, away_prob=None) -> dict:
+                home_prob=None, away_prob=None, dressed=True) -> dict:
         """Expected home margin and its predictive sd before tip-off."""
-        h = self.team_strength(home, home_players, play_prob=home_prob)
-        a = self.team_strength(away, away_players, play_prob=away_prob)
+        h = self.team_strength(home, home_players, play_prob=home_prob, dressed=dressed)
+        a = self.team_strength(away, away_players, play_prob=away_prob, dressed=dressed)
         sd = np.sqrt(self.p["sigma"] ** 2 + h["var"] + a["var"])
         return {"margin": self.hfa + h["strength"] - a["strength"],
                 "sd": float(sd), "hfa": self.hfa, "home": h, "away": a}
 
     # ── post-game ────────────────────────────────────────────────────────────
     def update(self, home, away, margin, jh, ja, min_h, min_a, pm_h, pm_a,
-               box_h, box_a, day=0):
+               box_h, box_a, day=0, unused_h=(), unused_a=()):
         """Learn from a finished game.  jh / ja: rows of the players who
         played; min_*: their minutes; pm_*: plus-minus; box_*: Game Score
-        (box_line @ GAME_SCORE).  Returns the expected margin given minutes."""
+        (box_line @ GAME_SCORE); unused_*: rows of players who dressed but
+        did not play.  Returns the expected margin given minutes."""
         p = self.p
+        if min_h.sum() <= 0 or min_a.sum() <= 0:
+            return np.nan                          # incomplete box score
         j = np.concatenate([jh, ja])
         mins = np.concatenate([min_h, min_a])
         sh, sa = 5 * min_h / min_h.sum(), 5 * min_a / min_a.sum()
@@ -231,11 +246,18 @@ class PlayerElo:
         gs = np.concatenate([box_h, box_a])
         ok = mins > 0
         self.n_games += 1
-        self.xm += (48 * gs.sum() / max(mins.sum(), 1.0) - self.xm) / min(self.n_games, 500)
+        rate = 1 / min(self.n_games, 500)
+        self.xm += rate * (48 * gs.sum() / max(mins.sum(), 1.0) - self.xm)
+        self.rmean += rate * (np.abs(h) @ R / 10 - self.rmean)
         jj = j[ok]
         self.bn[jj] = self._a_box * self.bn[jj] + gs[ok]
         self.bd[jj] = self._a_box * self.bd[jj] + mins[ok]
         self.em[jj] += self._a_min * (mins[ok] - self.em[jj])
+        self.ea[jj] += self._a_min * (mins[ok] - self.ea[jj])
+        for t, u in ((home, unused_h), (away, unused_a)):
+            if len(u):
+                self.ea[u] -= self._a_min * self.ea[u]
+                self.team[u], self.last_day[u] = t, day
         self.n[jj] += 1
         self.team[jh], self.team[ja] = home, away
         self.last_day[j] = day
@@ -264,13 +286,14 @@ class PlayerElo:
 
     # ── inspection / persistence ─────────────────────────────────────────────
     def leaderboard(self, n=10, min_games=20, active_since=None) -> list:
-        """Top players by full rating R (points per 48 above average)."""
+        """Top players by full rating (points per 48 above the average
+        player = impact + box)."""
         m = len(self.ids)
         ok = self.n[:m] >= min_games
         if active_since is not None:
             ok &= self.last_day[:m] >= active_since
         j = np.flatnonzero(ok)
-        R, B = self.rating(j), self.box(j)
+        R, B = self.rating(j) - self.rmean, self.box(j) - self.rmean
         o = np.argsort(-R)[:n]
         return [{"player_id": self.ids[k], "name": self.names[k],
                  "rating": round(float(R[i]), 2),
@@ -303,17 +326,11 @@ class PlayerElo:
 
 # ── batch replay (research, and rebuilding the live state from history) ──────
 
-def prepare(games, box) -> dict:
-    """Pack one-row-per-game `games` (GAME_ID, GAME_DATE, SEASON, TEAM_ID_H,
-    TEAM_ID_A, MARGIN; date-sorted) and player box rows (GAME_ID, TEAM_ID,
-    PLAYER_ID, PLAYER_NAME, MIN, PM + BOX_STATS) into flat arrays.  Only
-    players with minutes > 0 are kept."""
+def _pack(games, rows):
+    """Box rows → (rows sorted by game, side; CSR pointer per game side)."""
     import pandas as pd
-    games = games.reset_index(drop=True)
     gi = pd.Series(np.arange(len(games)), index=games["GAME_ID"].values)
-    b = box[box["MIN"] > 0].copy()
-    b["G"] = b["GAME_ID"].map(gi)
-    b = b.dropna(subset=["G"])
+    b = rows.assign(G=rows["GAME_ID"].map(gi)).dropna(subset=["G"])
     b["G"] = b["G"].astype(np.int64)
     home = games["TEAM_ID_H"].values[b["G"].values]
     away = games["TEAM_ID_A"].values[b["G"].values]
@@ -322,15 +339,30 @@ def prepare(games, box) -> dict:
     b = b[b["SIDE"] >= 0].sort_values(["G", "SIDE", "MIN"],
                                       ascending=[True, True, False])
     key = b["G"].values * 2 + b["SIDE"].values
+    return b, np.searchsorted(key, np.arange(2 * len(games) + 1))
+
+
+def prepare(games, box) -> dict:
+    """Pack one-row-per-game `games` (GAME_ID, GAME_DATE, SEASON, TEAM_ID_H,
+    TEAM_ID_A, MARGIN; date-sorted) and player box rows (GAME_ID, TEAM_ID,
+    PLAYER_ID, PLAYER_NAME, MIN, PM, COMMENT + BOX_STATS) into flat arrays:
+    players with minutes > 0, and players who dressed but did not play
+    (DNP - Coach's Decision)."""
+    import pandas as pd
+    games = games.reset_index(drop=True)
+    b, ptr = _pack(games, box[box["MIN"] > 0])
+    dnp = box["COMMENT"].astype(str).str.startswith("DNP - Coach") & (box["MIN"] <= 0)
+    u, uptr = _pack(games, box[dnp])
     day = (pd.to_datetime(games["GAME_DATE"]) - pd.Timestamp("2000-01-01")).dt.days
     return {
-        "games": games, "ptr": np.searchsorted(key, np.arange(2 * len(games) + 1)),
+        "games": games, "ptr": ptr,
         "day": day.values, "season": games["SEASON"].values,
         "home": games["TEAM_ID_H"].values, "away": games["TEAM_ID_A"].values,
         "margin": games["MARGIN"].values.astype(float),
         "pid": b["PLAYER_ID"].values, "name": b["PLAYER_NAME"].values,
         "min": b["MIN"].values.astype(float), "pm": b["PM"].values.astype(float),
         "box": b[BOX_STATS].values.astype(float) @ GAME_SCORE,
+        "uptr": uptr, "upid": u["PLAYER_ID"].values, "uname": u["PLAYER_NAME"].values,
     }
 
 
@@ -353,26 +385,33 @@ def team_prepare(games) -> dict:
         "home": games["TEAM_ID_H"].values, "away": games["TEAM_ID_A"].values,
         "margin": margin, "pid": pid, "name": pid.astype(str),
         "min": np.full(2 * n, 240.0), "pm": pm,
-        "box": np.zeros(2 * n),
+        "box": np.zeros(2 * n), "uptr": np.zeros(2 * n + 1, np.int64),
+        "upid": np.zeros(0, np.int64), "uname": np.zeros(0, str),
     }
 
 
 def replay(prep: dict, roster_games: int = 10, **params):
     """Chronological pass over every game.  Each output row holds the state
     BEFORE that game; all games of a day are predicted before any of them
-    is learned from.  Besides the strength of the players who play, each
-    team's full-strength rating (its regulars from the last `roster_games`
-    games still on the roster) is recorded: PE_DIFF - PE_FULL_DIFF is the
-    effect of absences.  Returns (DataFrame aligned with prep['games'],
-    final engine)."""
+    is learned from.  Recorded per side:
+      PE_H / PE_A          strength of the players who play (minutes > 0),
+      PE_LIVE_H / _A       strength of the active roster (players who play +
+                           dressed-but-unused), weighted by minutes-if-dressed:
+                           what the live app can compute from inactive lists,
+      PE_FULL_H / _A       full strength: regulars of the last `roster_games`
+                           games still on the roster (PE_DIFF - PE_FULL_DIFF
+                           is the effect of absences).
+    Returns (DataFrame aligned with prep['games'], final engine)."""
     import pandas as pd
     from collections import deque
     eng = PlayerElo(**params)
-    ptr, day, season = prep["ptr"], prep["day"], prep["season"]
+    ptr, uptr = prep["ptr"], prep["uptr"]
+    day, season = prep["day"], prep["season"]
     n = len(day)
     cols = {k: np.zeros(n) for k in ("PE_H", "PE_A", "PE_HFA", "PE_VAR",
                                       "PE_IMP", "PE_BOX", "PE_TEAM",
-                                      "PE_FULL_H", "PE_FULL_A")}
+                                      "PE_FULL_H", "PE_FULL_A",
+                                      "PE_LIVE_H", "PE_LIVE_A")}
     recent = {}                                       # team -> rows of last games
     starts = np.flatnonzero(np.r_[True, day[1:] != day[:-1]])
     for s0, s1 in zip(starts, np.r_[starts[1:], n]):
@@ -382,11 +421,15 @@ def replay(prep: dict, roster_games: int = 10, **params):
         for g in range(s0, s1):                       # pre-game, whole day
             a, m, z = ptr[2 * g], ptr[2 * g + 1], ptr[2 * g + 2]
             j = eng.rows(prep["pid"][a:z], prep["name"][a:z])
+            ua, um, uz = uptr[2 * g], uptr[2 * g + 1], uptr[2 * g + 2]
+            u = eng.rows(prep["upid"][ua:uz], prep["uname"][ua:uz])
             sides = []
-            for jj, t, sfx in ((j[:m - a], prep["home"][g], "H"),
-                               (j[m - a:], prep["away"][g], "A")):
+            for jj, uu, t, sfx in ((j[:m - a], u[:um - ua], prep["home"][g], "H"),
+                                   (j[m - a:], u[um - ua:], prep["away"][g], "A")):
                 eng.ensure_team(t)
                 s = eng.side(jj, t)
+                cols["PE_LIVE_" + sfx][g] = eng.side(np.r_[jj, uu], t,
+                                                     dressed=True)["strength"]
                 past = recent.setdefault(t, deque(maxlen=roster_games))
                 pool = np.unique(np.concatenate([jj, *past]))
                 full = np.union1d(jj, pool[eng.team[pool] == t])
@@ -399,16 +442,18 @@ def replay(prep: dict, roster_games: int = 10, **params):
             cols["PE_TEAM"][g] = hs["team"] - aws["team"]
             cols["PE_VAR"][g] = hs["var"] + aws["var"]
             cols["PE_HFA"][g] = eng.hfa
-            seg.append((g, a, m, z, j[:m - a], j[m - a:]))
-        for g, a, m, z, jh, ja in seg:                # post-game learning
+            seg.append((g, a, m, z, j[:m - a], j[m - a:], u, um - ua))
+        for g, a, m, z, jh, ja, u, nu in seg:         # post-game learning
             eng.update(prep["home"][g], prep["away"][g], prep["margin"][g],
                        jh, ja, prep["min"][a:m], prep["min"][m:z],
                        prep["pm"][a:m], prep["pm"][m:z],
-                       prep["box"][a:m], prep["box"][m:z], day[g])
+                       prep["box"][a:m], prep["box"][m:z], day[g],
+                       u[:nu], u[nu:])
             recent[prep["home"][g]].append(jh)
             recent[prep["away"][g]].append(ja)
     out = pd.DataFrame(cols, index=prep["games"].index)
     out["PE_DIFF"] = out["PE_HFA"] + out["PE_H"] - out["PE_A"]
     out["PE_FULL_DIFF"] = out["PE_HFA"] + out["PE_FULL_H"] - out["PE_FULL_A"]
+    out["PE_LIVE_DIFF"] = out["PE_HFA"] + out["PE_LIVE_H"] - out["PE_LIVE_A"]
     out["PE_SD"] = np.sqrt(eng.p["sigma"] ** 2 + out["PE_VAR"])
     return out, eng
