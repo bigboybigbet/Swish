@@ -28,7 +28,7 @@ def _team_matches(team_name: str, espn_name: str) -> bool:
 def load_player_impact() -> dict:
     """Load from player_impact.json; fall back to hardcoded dict."""
     if os.path.exists(PLAYER_IMPACT_FILE):
-        with open(PLAYER_IMPACT_FILE) as f:
+        with open(PLAYER_IMPACT_FILE, encoding="utf-8") as f:
             data = json.load(f)
         return data.get("players", data)
     return PLAYER_IMPACT_FALLBACK
@@ -38,7 +38,7 @@ def load_player_impact_meta() -> dict:
     """Return metadata (season, updated, count) from the JSON file."""
     if os.path.exists(PLAYER_IMPACT_FILE):
         try:
-            with open(PLAYER_IMPACT_FILE) as f:
+            with open(PLAYER_IMPACT_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             return {
                 "season":  data.get("season", "—"),

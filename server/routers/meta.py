@@ -30,6 +30,7 @@ def status():
         "today_et": today.isoformat(),
         "demo": {"date": demo.isoformat()} if demo else None,
         "model": model,
+        "team_strength": team_strength_info(),
         "dataset": dataset_info(),
         "elo": elo_info(),
         "calibrator": calibrator_info(),
@@ -54,6 +55,16 @@ def _read_json(path) -> dict | None:
             return json.load(f)
     except (OSError, ValueError):
         return None
+
+
+def team_strength_info() -> dict:
+    """The Kalman-Elo state that drives predictions (built by Train)."""
+    from engine import team_strength
+    st = team_strength.get_state()
+    if not st:
+        return {"exists": False}
+    return {"exists": True, "season": st.get("season"), "n_games": st.get("n_games"),
+            "last_game_date": st.get("last_game_date"), "built_at": st.get("built_at")}
 
 
 def model_info() -> dict:

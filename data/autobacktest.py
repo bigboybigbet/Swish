@@ -25,7 +25,7 @@ def _team_name(team_id: int) -> str | None:
 
 def load_log() -> set:
     if os.path.exists(AUTOBACKTEST_LOG):
-        with open(AUTOBACKTEST_LOG) as f:
+        with open(AUTOBACKTEST_LOG, encoding="utf-8") as f:
             return set(json.load(f).get("processed_game_ids", []))
     return set()
 
@@ -38,7 +38,7 @@ def _save_log(new_ids: set):
 
 def log_stats() -> dict:
     if os.path.exists(AUTOBACKTEST_LOG):
-        with open(AUTOBACKTEST_LOG) as f:
+        with open(AUTOBACKTEST_LOG, encoding="utf-8") as f:
             d = json.load(f)
         return {"total": d.get("total", 0)}
     return {"total": 0}

@@ -7,7 +7,7 @@ from data.atomic import atomic_write_json
 
 def load_elo() -> dict:
     if os.path.exists(ELO_FILE):
-        with open(ELO_FILE) as f:
+        with open(ELO_FILE, encoding="utf-8") as f:
             return json.load(f)
     return {}
 

@@ -18,6 +18,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _announce_when_ready(url: str, open_browser: bool, timeout: float = 180.0):
+    """Wait until the server answers, then say so and open the browser —
+    opening it earlier shows "can't reach this page" on a slow first start."""
+    import time
+    import urllib.request
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url + "/api/health", timeout=2):
+                break
+        except Exception:                  # noqa: BLE001  (not up yet)
+            time.sleep(0.5)
+    else:
+        print(f"Swish did not start within {timeout:.0f} s; see the messages above.", flush=True)
+        return
+    print(f"Ready: open {url} in your browser (Ctrl+C to stop).", flush=True)
+    if open_browser:
+        webbrowser.open(url)
+
+
 def main(argv=None):
     os.chdir(ROOT)
     if str(ROOT) not in sys.path:
@@ -48,9 +68,10 @@ def main(argv=None):
 
     browse_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     url = f"http://{browse_host}:{args.port}"
-    print(f"Swish at {url}" + (f"  (demo mode: replaying {demo})" if demo else ""))
-    if not args.no_browser:
-        threading.Timer(1.0, webbrowser.open, [url]).start()
+    print(f"Starting Swish at {url}" + (f"  (demo mode: replaying {demo})" if demo else "")
+          + "\nThe first start can take up to a minute while libraries load…", flush=True)
+    threading.Thread(target=_announce_when_ready, args=(url, not args.no_browser),
+                     daemon=True).start()
 
     import uvicorn
     uvicorn.run(

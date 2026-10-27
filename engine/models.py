@@ -7,16 +7,10 @@ import time
 import numpy as np
 import pandas as pd
 from joblib import load
-from nba_api.stats.endpoints import leaguegamefinder
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.metrics import accuracy_score, log_loss
-from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
-from xgboost import XGBClassifier
 
-try:                                   # scikit-learn >= 1.6
-    from sklearn.frozen import FrozenEstimator
-except ImportError:                    # older releases still accept cv="prefit"
-    FrozenEstimator = None
+# scikit-learn, xgboost and nba_api are imported inside the functions that
+# train or download: predictions with the v6 team-strength model need none
+# of them, and importing them up front slowed the app's start by seconds.
 
 from config import (BLEND_FILE, DATASET_FILE, ELO_DEFAULT, FEATURE_COLS,
                     MODEL_FILE, N_JOBS, OPTUNA_PARAMS_FILE, RECENCY_HALFLIFE_DAYS,
@@ -104,7 +98,7 @@ class BlendCalibrator:
         bc = cls()
         p  = path or BLEND_FILE
         if os.path.exists(p):
-            with open(p) as f:
+            with open(p, encoding="utf-8") as f:
                 d = json.load(f)
             bc.weights   = np.array(d["weights"])
             bc.bias      = float(d["bias"])
@@ -158,8 +152,18 @@ def get_feature_importance(model) -> dict:
     return dict(zip(FEATURE_COLS, imp.tolist()))
 
 
+def _frozen_estimator_class():
+    try:                                   # scikit-learn >= 1.6
+        from sklearn.frozen import FrozenEstimator
+        return FrozenEstimator
+    except ImportError:                    # older releases still accept cv="prefit"
+        return None
+
+
 def _calibrate_prefit(est, X_cal, y_cal, method: str = "sigmoid"):
     """Calibrate an already-fitted classifier on a held-out split."""
+    from sklearn.calibration import CalibratedClassifierCV
+    FrozenEstimator = _frozen_estimator_class()
     if FrozenEstimator is not None:
         model = CalibratedClassifierCV(FrozenEstimator(est), method=method)
     else:
@@ -169,6 +173,7 @@ def _calibrate_prefit(est, X_cal, y_cal, method: str = "sigmoid"):
 
 def _base_estimator(est):
     """Strip a FrozenEstimator wrapper, if any."""
+    FrozenEstimator = _frozen_estimator_class()
     return getattr(est, "estimator", est) if FrozenEstimator is not None \
         and isinstance(est, FrozenEstimator) else est
 
@@ -195,6 +200,8 @@ def _search_params(X: pd.DataFrame, y: pd.Series, report) -> dict:
     dict found across 20 random candidates × 3 time-ordered folds.
     No single number here is hardcoded; they all come from your data.
     """
+    from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
+    from xgboost import XGBClassifier
     report("Running RandomizedSearchCV (20 candidates × 3 time-series folds)…")
     tscv   = TimeSeriesSplit(n_splits=3)
     # Parallelism comes from the search (N_JOBS fits at once, one thread each);
@@ -234,6 +241,7 @@ def fetch_game_logs(seasons=None, report=print) -> pd.DataFrame | None:
     all_games = []
     for s in seasons:
         try:
+            from nba_api.stats.endpoints import leaguegamefinder
             finder = leaguegamefinder.LeagueGameFinder(
                 season_nullable=s, league_id_nullable="00"
             )
@@ -431,6 +439,8 @@ def train_model(force_rebuild: bool = False, use_optuna: bool = False,
 def fit_matchup_model(df: pd.DataFrame, use_optuna: bool = False,
                       report=print) -> tuple:
     """Fit + calibrate on a matchup dataset; returns (model, metrics). No I/O."""
+    from sklearn.metrics import accuracy_score, log_loss
+    from xgboost import XGBClassifier
     df = df.sort_values("GAME_DATE").reset_index(drop=True)
     X  = df[FEATURE_COLS]
     y  = df["RESULT"]
@@ -454,7 +464,7 @@ def fit_matchup_model(df: pd.DataFrame, use_optuna: bool = False,
             capture_output=True, text=True, timeout=600,
         )
         if proc.returncode == 0 and os.path.exists(OPTUNA_PARAMS_FILE):
-            with open(OPTUNA_PARAMS_FILE) as f:
+            with open(OPTUNA_PARAMS_FILE, encoding="utf-8") as f:
                 best_params = json.load(f)
             report("Optuna params loaded.")
         else:
