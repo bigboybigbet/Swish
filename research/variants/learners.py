@@ -42,9 +42,9 @@ _NEEDED = ["PLUS_MINUS", "PTS", "FGM", "FGA", "FG3M",
 LR_C = 0.03
 GBM_PARAMS = {
     "objective": "binary", "learning_rate": 0.02, "num_leaves": 4,
-    "min_child_samples": 200, "reg_lambda": 10.0, "colsample_bytree": 0.7,
-    "subsample": 0.8, "subsample_freq": 1, "n_jobs": 1, "verbose": -1,
-    "random_state": 0,
+    "min_data_in_leaf": 200, "lambda_l2": 10.0, "feature_fraction": 0.7,
+    "bagging_fraction": 0.8, "bagging_freq": 1, "num_threads": 1,
+    "verbose": -1, "seed": 0,
 }
 GBM_VAL_FRAC = 0.2
 GBM_PATIENCE = 100
@@ -121,14 +121,24 @@ class EloAnchoredEnsemble:
         self.features = list(features)
 
     @staticmethod
-    def _elo_logit(frame: pd.DataFrame):
-        m = LogisticRegression(C=1e6).fit(frame[["ELO_DIFF"]], frame["RESULT"])
-        return lambda d: m.decision_function(d[["ELO_DIFF"]])
+    def _elo_lr(frame: pd.DataFrame) -> LogisticRegression:
+        """P(home win) from ELO_DIFF alone: learns the home edge and slope."""
+        return LogisticRegression(C=1e6).fit(frame[["ELO_DIFF"]], frame["RESULT"])
 
-    def _gbm(self, n_trees: int) -> lgb.LGBMClassifier:
-        mono = [MONOTONE.get(c, 0) for c in self.features]
-        return lgb.LGBMClassifier(n_estimators=n_trees, monotone_constraints=mono,
-                                  **GBM_PARAMS)
+    def _boost(self, frame: pd.DataFrame, offset: np.ndarray, rounds: int,
+               valid: tuple = None) -> lgb.Booster:
+        """Monotone GBM on top of the Elo logit (native API: init_score works
+        the same in every LightGBM version the app may have)."""
+        params = {**GBM_PARAMS,
+                  "monotone_constraints": [MONOTONE.get(c, 0) for c in self.features]}
+        data = lgb.Dataset(frame[self.features], frame["RESULT"], init_score=offset)
+        kw = {}
+        if valid is not None:
+            vf, voff = valid
+            kw["valid_sets"] = [lgb.Dataset(vf[self.features], vf["RESULT"],
+                                            init_score=voff, reference=data)]
+            kw["callbacks"] = [lgb.early_stopping(GBM_PATIENCE, verbose=False)]
+        return lgb.train(params, data, num_boost_round=rounds, **kw)
 
     def fit(self, df: pd.DataFrame) -> "EloAnchoredEnsemble":
         df = df.sort_values("GAME_DATE")
@@ -139,21 +149,22 @@ class EloAnchoredEnsemble:
         # number of trees: early stopping on the most recent slice
         n = int(len(df) * (1 - GBM_VAL_FRAC))
         a, b = df.iloc[:n], df.iloc[n:]
-        off = self._elo_logit(a)
-        es = self._gbm(GBM_MAX_TREES).fit(
-            a[self.features], a["RESULT"], init_score=off(a),
-            eval_set=[(b[self.features], b["RESULT"])], eval_init_score=[off(b)],
-            callbacks=[lgb.early_stopping(GBM_PATIENCE, verbose=False)])
-        self.n_trees = max(int(es.best_iteration_ or 1), 1)
+        elo = self._elo_lr(a)
+        es = self._boost(a, elo.decision_function(a[["ELO_DIFF"]]), GBM_MAX_TREES,
+                         valid=(b, elo.decision_function(b[["ELO_DIFF"]])))
+        self.n_trees = max(int(es.best_iteration or 1), 1)
 
-        self.offset = self._elo_logit(df)
-        self.gbm = self._gbm(self.n_trees).fit(X, y, init_score=self.offset(df))
+        self.elo = self._elo_lr(df)
+        self.gbm = self._boost(df, self._offset(df), self.n_trees)
         return self
+
+    def _offset(self, df: pd.DataFrame) -> np.ndarray:
+        return self.elo.decision_function(df[["ELO_DIFF"]])
 
     def decision_function(self, df: pd.DataFrame) -> np.ndarray:
         X = df[self.features]
         z_lr = self.lr.decision_function(X)
-        z_gb = self.gbm.predict(X, raw_score=True) + self.offset(df)
+        z_gb = self.gbm.predict(X, raw_score=True) + self._offset(df)
         return (z_lr + z_gb) / 2
 
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:

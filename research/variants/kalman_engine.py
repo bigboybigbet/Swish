@@ -50,6 +50,9 @@ PARAMS = dict(
     lineup0=0.0, v_lineup0=0.0, q_lineup=0.0,  # lineup covariate coefficient
     clip=np.inf,         # innovations clipped at clip·s (robust update)
     sigma_po=1.0,        # playoff margin sd as a multiple of sigma
+    v_team_home=0.0,     # prior variance of per-team home edges (0 = none)
+    adapt=0.0,           # weight of each game in the online estimate of σ²
+                         # (E[e²] = h'Ph + σ²; 0 keeps σ fixed)
     # od mode only
     sigma_t=17.0,        # sd of the game total (points)
     mu0=100.0, v_mu0=25.0, q_mu=0.01,         # league scoring level per team
@@ -121,6 +124,11 @@ class KalmanRatings:
         if self.od:
             self.x[self.g_mu] = p["mu0"]
             var0, qd = np.r_[var0, p["v_mu0"]], np.r_[qd, p["q_mu"]]
+        self.g_th = []
+        if p["v_team_home"] > 0:                 # team-specific home edges
+            self.g_th = list(range(m, m + n))
+            self.x = np.r_[self.x, np.zeros(n)]
+            var0, qd = np.r_[var0, np.full(n, p["v_team_home"])], np.r_[qd, np.zeros(n)]
         self.P = np.diag(var0)
         self.qd = qd
         self.split = team_split
@@ -131,6 +139,7 @@ class KalmanRatings:
                         else np.full(n, p["rho"]))
         self.day = None
         self.season = None
+        self.s2 = p["sigma"] ** 2               # current margin noise variance
 
     # ── time update ──
     def roll_season(self, season: str):
@@ -163,7 +172,11 @@ class KalmanRatings:
         idx += [self.g_home, self.g_b2b] + self.g_lin
         dl = np.broadcast_to(np.asarray(lin_h, float) - np.asarray(lin_a, float),
                              (len(self.g_lin),))
-        return np.array(idx), np.r_[cf, 1.0 - neutral, float(b2b_a - b2b_h), dl]
+        cf = np.r_[cf, 1.0 - neutral, float(b2b_a - b2b_h), dl]
+        if self.g_th:
+            idx.append(self.g_th[i])
+            cf = np.r_[cf, 1.0 - neutral]
+        return np.array(idx), cf
 
     def _total_row(self, h, a):
         i, j, n = self.ix[h], self.ix[a], self.n
@@ -177,7 +190,7 @@ class KalmanRatings:
 
     # ── public API ──
     def _sigma2(self, playoff):
-        return (self.p["sigma"] * (self.p["sigma_po"] if playoff else 1.0)) ** 2
+        return self.s2 * (self.p["sigma_po"] ** 2 if playoff else 1.0)
 
     def predict(self, h, a, playoff=0, **cov):
         """Pre-game (mean margin, predictive sd, sd of the state part,
@@ -192,18 +205,25 @@ class KalmanRatings:
         return float(ndtr(mu / s))
 
     def _update(self, idx, cf, y, r2):
+        """Scalar measurement update; returns (innovation, its variance)."""
         Ph = self.P[:, idx] @ cf
         S = cf @ Ph[idx] + r2
         e = y - cf @ self.x[idx]
         c = self.p["clip"] * np.sqrt(S)
-        e = min(max(e, -c), c)
         k = Ph / S
-        self.x += k * e
+        self.x += k * min(max(e, -c), c)
         self.P -= np.outer(k, Ph)
+        return e, S
 
     def update(self, h, a, margin, total=None, playoff=0, **cov):
         """Measurement update with a final score (after the pre-game read)."""
-        self._update(*self._margin_row(h, a, **cov), margin, self._sigma2(playoff))
+        r2 = self._sigma2(playoff)
+        e, S = self._update(*self._margin_row(h, a, **cov), margin, r2)
+        a_ = self.p["adapt"]
+        if a_ > 0:        # moment-matching estimate of the margin noise
+            scale = r2 / self.s2
+            self.s2 += a_ * (e * e / scale - (S - r2) / scale - self.s2)
+            self.s2 = max(self.s2, 25.0)
         if self.od and total is not None:
             self._update(*self._total_row(h, a), total, self.p["sigma_t"] ** 2)
 
