@@ -16,6 +16,13 @@ def isolated(tmp_path, monkeypatch):
     from server import paths
     monkeypatch.setattr(paths, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(paths, "SETTINGS_FILE", tmp_path / "settings.json")
+    # runs/ state (jobs.json is rewritten at app startup): never the real one.
+    runs = tmp_path / "runs"
+    monkeypatch.setattr(paths, "RUNS_DIR", runs)
+    monkeypatch.setattr(paths, "JOBS_FILE", runs / "jobs.json")
+    monkeypatch.setattr(paths, "RESULTS_DIR", runs / "results")
+    monkeypatch.setattr(paths, "SCANS_DIR", runs / "scans")
+    monkeypatch.setattr(paths, "SNAPSHOTS_DIR", runs / "ratings_snapshots")
     for var in (*SECRET_VARS, "NBA_QUANT_DEMO_DATE", "NBA_HOST", "NBA_PORT"):
         monkeypatch.setenv(var, "")   # records the original, so values set by code under test are undone
         monkeypatch.delenv(var)

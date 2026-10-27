@@ -6,7 +6,6 @@ Usage:
     python player_impact_updater.py              # current season auto-detected
     python player_impact_updater.py 2024-25      # specific season
 """
-import json
 import os
 import sys
 import time
@@ -17,6 +16,7 @@ from nba_api.stats.endpoints import leaguedashplayerstats
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import current_season, season_string  # noqa: E402
+from data.atomic import atomic_write_json  # noqa: E402
 
 OUTPUT_FILE = "player_impact.json"
 MIN_MINUTES = 150  # filter out players with too little playing time
@@ -68,8 +68,7 @@ def save(data: dict, season: str):
         "count": len(data),
         "players": data,
     }
-    with open(OUTPUT_FILE, "w") as f:
-        json.dump(payload, f, indent=2)
+    atomic_write_json(OUTPUT_FILE, payload, indent=2)
     print(f"  Saved {len(data)} players to {OUTPUT_FILE}")
 
 

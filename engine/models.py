@@ -198,7 +198,7 @@ def _search_params(X: pd.DataFrame, y: pd.Series, report) -> dict:
     report("Running RandomizedSearchCV (20 candidates × 3 time-series folds)…")
     tscv   = TimeSeriesSplit(n_splits=3)
     # Parallelism comes from the search (N_JOBS fits at once, one thread each);
-    # n_jobs=-1 on both levels oversubscribed the CPU.
+    # all cores on both levels oversubscribed the CPU.
     base   = XGBClassifier(eval_metric="logloss", random_state=42, n_jobs=1)
     search = RandomizedSearchCV(
         base, _PARAM_GRID,
@@ -520,6 +520,47 @@ def build_matchup_row(hd: dict, ad: dict) -> pd.DataFrame:
     return pd.DataFrame([vals], columns=FEATURE_COLS)
 
 
+def injury_adjusted(hd: dict, ad: dict, h_inj=None, a_inj=None) -> tuple:
+    """
+    (hs, as_, hf, af): both team dicts after the injury adjustment, plus
+    their strength factors.  This is the one place the adjustment happens:
+    XGBoost, Monte Carlo, Elo and SHAP all read these same rows.
+    """
+    hf = calc_strength_factor(h_inj) if h_inj else 1.0
+    af = calc_strength_factor(a_inj) if a_inj else 1.0
+    return apply_injury_adjustment(hd, hf), apply_injury_adjustment(ad, af), hf, af
+
+
+def predict_detail(hd: dict, ad: dict, model, h_inj=None, a_inj=None,
+                   calibrator: "BlendCalibrator | None" = None) -> dict:
+    """
+    predict_hybrid's numbers as a dict, plus the injury-adjusted rows they
+    came from (hs, as, row) so explanations use exactly what the model saw.
+
+    model=None (no trained model) skips XGBoost and the blend: xgb_p, fp
+    and conflict are then None and the caller decides the final number.
+    """
+    hs, as_, hf, af = injury_adjusted(hd, ad, h_inj, a_inj)
+    row = build_matchup_row(hs, as_)
+
+    xgb_p = float(model.predict_proba(row)[0][1]) if model is not None else None
+
+    mc       = run_monte_carlo(hs, as_)
+    mc_p     = mc["mc_home_prob"]
+    elo_diff = hs.get("ELO", ELO_DEFAULT) - as_.get("ELO", ELO_DEFAULT)
+
+    fp = conflict = None
+    if xgb_p is not None:
+        calib    = calibrator or get_calibrator()
+        fp       = calib.predict(xgb_p, mc_p, elo_diff)
+        conflict = (xgb_p > 0.5) != (mc_p > 0.5)
+    return {
+        "fp": fp, "xgb_p": xgb_p, "mc_p": mc_p, "elo_diff": elo_diff,
+        "conflict": conflict, "mc": mc, "hf": hf, "af": af,
+        "hs": hs, "as": as_, "row": row,
+    }
+
+
 def predict_hybrid(hd: dict, ad: dict, model,
                    h_inj=None, a_inj=None) -> tuple:
     """
@@ -531,19 +572,7 @@ def predict_hybrid(hd: dict, ad: dict, model,
     BlendCalibrator — a learned logistic regression over
     (xgb_p, mc_p, elo_diff) whose weights shift after every game result.
     """
-    hf  = calc_strength_factor(h_inj) if h_inj else 1.0
-    af  = calc_strength_factor(a_inj) if a_inj else 1.0
-    hs  = apply_injury_adjustment(hd, hf)
-    as_ = apply_injury_adjustment(ad, af)
-
-    xgb_p = float(model.predict_proba(build_matchup_row(hs, as_))[0][1])
-
-    mc       = run_monte_carlo(hs, as_)
-    mc_p     = mc["mc_home_prob"]
-    elo_diff = hs.get("ELO", ELO_DEFAULT) - as_.get("ELO", ELO_DEFAULT)
-
-    calib = get_calibrator()
-    fp    = calib.predict(xgb_p, mc_p, elo_diff)
-
-    conflict = (xgb_p > 0.5) != (mc_p > 0.5)
-    return fp, mc["spread_margin"], mc["median_total"], xgb_p, mc_p, conflict, mc, hf, af
+    d  = predict_detail(hd, ad, model, h_inj, a_inj)
+    mc = d["mc"]
+    return (d["fp"], mc["spread_margin"], mc["median_total"], d["xgb_p"], d["mc_p"],
+            d["conflict"], mc, d["hf"], d["af"])

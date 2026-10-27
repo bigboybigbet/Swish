@@ -52,31 +52,51 @@ def load_player_impact_meta() -> dict:
 
 # ── injury report ─────────────────────────────────────────────────────────────
 
-def get_injury_report(team_name: str) -> list:
-    try:
-        data = requests.get(
-            "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries",
-            timeout=8,
-        ).json()
-        injured, seen = [], set()
-        for entry in data.get("injuries", []):
-            tn = entry.get("displayName", "")
-            if not _team_matches(team_name, tn):
+INJURY_FEED_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
+
+
+def fetch_injury_feed() -> dict:
+    """The league-wide ESPN injury feed (one request for all teams).
+
+    Raises on network, HTTP or JSON errors, so callers can tell "no
+    injuries" apart from "feed down".
+    """
+    resp = requests.get(INJURY_FEED_URL, timeout=8)
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise ValueError("unexpected ESPN injury feed format")
+    return data
+
+
+def parse_injury_report(feed: dict, team_name: str) -> list:
+    """Injured players of one team from a fetch_injury_feed() result:
+    [{name, status, detail}], status being a STATUS_WEIGHT key."""
+    injured, seen = [], set()
+    for entry in (feed or {}).get("injuries", []):
+        tn = entry.get("displayName", "")
+        if not _team_matches(team_name, tn):
+            continue
+        for p in entry.get("injuries", []):
+            player_name = (p.get("athlete") or {}).get("displayName", "")
+            if not player_name or player_name in seen:
                 continue
-            for p in entry.get("injuries", []):
-                player_name = (p.get("athlete") or {}).get("displayName", "")
-                if not player_name or player_name in seen:
-                    continue
-                status = p.get("status", "").lower()
-                key = next((s for s in STATUS_WEIGHT if s in status), None)
-                if key:
-                    seen.add(player_name)
-                    injured.append({
-                        "name":   player_name,
-                        "status": key,
-                        "detail": p.get("shortComment", ""),
-                    })
-        return injured
+            status = (p.get("status") or "").lower()
+            key = next((s for s in STATUS_WEIGHT if s in status), None)
+            if key:
+                seen.add(player_name)
+                injured.append({
+                    "name":   player_name,
+                    "status": key,
+                    "detail": p.get("shortComment", "") or "",
+                })
+    return injured
+
+
+def get_injury_report(team_name: str) -> list:
+    """Injured players of one team; [] when the feed is unavailable."""
+    try:
+        return parse_injury_report(fetch_injury_feed(), team_name)
     except Exception:
         return []
 

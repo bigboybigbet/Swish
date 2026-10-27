@@ -56,6 +56,9 @@ def main(argv=None):
     uvicorn.run(
         "server.app:create_app", factory=True,
         host=args.host, port=args.port, workers=1,
+        # Open SSE streams would otherwise keep Ctrl+C waiting until every job ends;
+        # after 3 s they are closed and running jobs are marked interrupted.
+        timeout_graceful_shutdown=3,
         reload=args.reload,
         reload_dirs=[str(ROOT / d) for d in ("server", "engine", "data")] if args.reload else None,
     )

@@ -63,4 +63,6 @@ def run_poisson_model(h: dict, a: dict) -> dict:
         "median_total":   float(np.median(tots)),
         "ou_80":          float(np.percentile(tots, 80)),
         "ou_20":          float(np.percentile(tots, 20)),
+        "lambda_h":       float(h_lam),   # expected points per quarter
+        "lambda_a":       float(a_lam),
     }

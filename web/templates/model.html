@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+{% from "_macros.html" import page_header, empty_state, skeleton_rows, job_progress, confirm_modal, glossary_tip %}
+
+{% block page_module %}/static/js/pages/model.js{% endblock %}
+
+{% block page_header %}{{ page_header("Model") }}{% endblock %}
+
+{% block content %}
+<div x-data="modelPage" class="model-page">
+
+  {#- running job: sticky at the top on phones (it survives navigation via the jobs tray) #}
+  <div class="card mb-3 job-card" x-show="focusJob" x-cloak aria-live="polite">
+    <div class="card-header">
+      <h2 class="card-title d-flex align-items-center gap-2">
+        <span class="status-dot status-dot-animated status-blue" aria-hidden="true"></span>
+        <span x-text="$store.jobs.label(focusJob)"></span>
+      </h2>
+      <div class="card-actions small text-secondary" x-show="focusJob?.kind === 'train'">
+        Typically about 10 min on 4 cores
+      </div>
+    </div>
+    <div class="card-body">
+      <div x-show="focusJob?.kind === 'train'">
+        <ol class="steps steps-counter steps-blue mb-3 d-none d-md-flex" aria-label="Training stages">
+          <template x-for="(name, i) in stages" :key="name">
+            <li class="step-item" :class="{active: stepIndex === i + 1}" :aria-current="stepIndex === i + 1 ? 'step' : null"
+                x-text="name"></li>
+          </template>
+        </ol>
+      </div>
+      {{ job_progress("focusJob") }}
+      <div class="small text-secondary mt-2" x-show="focusJob?.kind === 'train'" x-text="etaText"></div>
+      <details class="mt-3" :open="!isPhone">
+        <summary class="small text-secondary">Log</summary>
+        <pre class="job-log mt-2 mb-0" x-ref="log" x-text="(focusJob?.tail || []).join('\n') || 'Waiting for output…'"></pre>
+      </details>
+    </div>
+  </div>
+
+  {#- no model yet #}
+  <div class="card mb-3" x-show="loaded && model && !model.exists" x-cloak>
+    <div class="card-body">
+      {% call empty_state("cpu", "No trained model yet",
+         "Training downloads 3 seasons and takes about 10 minutes on a 4-core machine. Until then predictions use Elo + Monte Carlo.") %}
+        <a href="#train" class="btn btn-primary" @click.prevent="document.getElementById('train').scrollIntoView({behavior: 'smooth'})">
+          <i class="ti ti-player-play me-1" aria-hidden="true"></i>Train a model
+        </a>
+      {% endcall %}
+    </div>
+  </div>
+
+  <div class="alert alert-danger" role="alert" x-show="loadError" x-cloak>
+    <div class="d-flex align-items-center gap-2">
+      <i class="ti ti-alert-triangle fs-2" aria-hidden="true"></i>
+      <div class="flex-fill" x-text="loadError"></div>
+      <button type="button" class="btn btn-sm btn-outline-danger" @click="loadAll()">
+        <i class="ti ti-refresh me-1" aria-hidden="true"></i>Retry
+      </button>
+    </div>
+  </div>
+
+  {#- status cards #}
+  <div class="row row-cards mb-3">
+    <div class="col-12 col-sm-6 col-xl">
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="subheader">Model</div>
+            <span class="badge" :class="modelBadge.cls" x-text="modelBadge.text"></span>
+          </div>
+          <template x-if="s?.model?.exists">
+            <dl class="kv mb-0">
+              <dt>Trained</dt><dd :title="trainedText" x-text="$fmt.ago(s.model.trained_at)"></dd>
+              <dt>Val. accuracy</dt><dd class="num" x-text="$fmt.pct(s.model.val_acc, 1)"></dd>
+              <dt>Val. log loss {{ glossary_tip("log_loss") }}</dt><dd class="num" x-text="$fmt.num(s.model.val_loss, 4)"></dd>
+              <dt>Training games</dt><dd class="num" x-text="count(s.model.n_train)"></dd>
+            </dl>
+          </template>
+          <p class="text-secondary small mb-0" x-show="s && !s.model?.exists">Elo + Monte Carlo until a model is trained.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl">
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="subheader mb-2">Dataset</div>
+          <dl class="kv mb-0" x-show="s?.dataset?.exists">
+            <dt>Games</dt><dd class="num" x-text="count(s?.dataset?.rows)"></dd>
+            <dt>Updated</dt><dd x-text="$fmt.ago(s?.dataset?.mtime)"></dd>
+          </dl>
+          <p class="text-secondary small mb-0" x-show="s && !s.dataset?.exists">Not built yet. Training downloads it.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl">
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="subheader mb-2">Elo {{ glossary_tip("elo") }}</div>
+          <dl class="kv mb-0" x-show="s?.elo?.exists">
+            <dt>Teams</dt><dd class="num" x-text="s?.elo?.n_teams ?? '–'"></dd>
+            <dt>Updated</dt><dd x-text="$fmt.ago(s?.elo?.mtime)"></dd>
+          </dl>
+          <p class="text-secondary small mb-0" x-show="s && !s.elo?.exists">No ratings yet: every team is 1500.</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl">
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="subheader mb-2">Player impact</div>
+          <dl class="kv mb-0">
+            <dt>Season</dt><dd x-text="s?.player_impact?.season || '–'"></dd>
+            <dt>Players</dt><dd class="num" x-text="count(s?.player_impact?.count)"></dd>
+            <dt>Updated</dt><dd :title="s?.player_impact?.updated || ''" x-text="(s?.player_impact?.updated || '–').slice(0, 10)"></dd>
+          </dl>
+          <div class="text-warning small mt-2" x-show="s?.player_impact?.fallback" x-cloak>
+            <i class="ti ti-alert-triangle" aria-hidden="true"></i> Using the built-in list of 20 stars.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl">
+      <div class="card card-sm h-100">
+        <div class="card-body">
+          <div class="subheader mb-2">API cache</div>
+          <dl class="kv mb-2">
+            <dt>Live</dt><dd class="num" x-text="count(s?.cache?.live)"></dd>
+            <dt>Expired</dt><dd class="num" x-text="count(s?.cache?.expired)"></dd>
+          </dl>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#confirm-cache"
+                  :disabled="!s?.cache?.total || !!$store.jobs.writerBusy">
+            <i class="ti ti-trash me-1" aria-hidden="true"></i>Clear
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row row-cards mb-3">
+    {#- train #}
+    <div class="col-12 col-lg-7">
+      <div class="card h-100" id="train">
+        <div class="card-header"><h2 class="card-title">Train</h2></div>
+        <div class="card-body">
+          <p class="text-secondary">
+            <span x-show="!demoDate">Downloads <span x-text="seasonsText"></span> from NBA.com, replays Elo and fits a calibrated XGBoost model.</span>
+            <span x-show="demoDate" x-cloak>Demo mode: builds the dataset from the history files (3 seasons up to <span x-text="demoDate"></span>), replays Elo and fits a calibrated XGBoost model.</span>
+            Typically about 10 minutes on 4 cores; the app stays usable meanwhile.
+          </p>
+          <div class="mb-2">
+            <label class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" x-model="form.force_rebuild" :disabled="!!trainJob">
+              <span class="form-check-label">Force full rebuild</span>
+              <span class="form-hint">Rebuild the dataset instead of reusing the saved one.</span>
+            </label>
+            <label class="form-check form-switch" :title="optunaAvailable ? '' : 'Optuna is not installed (pip install optuna)'">
+              <input class="form-check-input" type="checkbox" x-model="form.use_optuna" :disabled="!optunaAvailable || !!trainJob">
+              <span class="form-check-label">Optuna HPO</span>
+              <span class="form-hint" x-text="optunaAvailable ? 'Bayesian search (30 trials) instead of a random search; adds a few minutes.' : 'Not installed: pip install optuna'"></span>
+            </label>
+          </div>
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <button type="button" class="btn btn-primary" @click="startTrain()" :disabled="!!$store.jobs.writerBusy || starting === 'train'"
+                    :title="$store.jobs.writerBusy ? busyText : ''">
+              <i class="ti ti-player-play me-1" aria-hidden="true"></i>Train
+            </button>
+            <span class="small text-secondary" x-show="$store.jobs.writerBusy && !trainJob" x-text="busyText" x-cloak></span>
+          </div>
+          <div class="mt-3" x-show="lastTrain && !trainJob" x-cloak>
+            <div class="alert mb-0" :class="lastTrainAlert.cls" role="status">
+              <div class="d-flex gap-2">
+                <i class="ti fs-2" :class="lastTrainAlert.icon" aria-hidden="true"></i>
+                <div>
+                  <div class="fw-bold" x-text="lastTrainAlert.title"></div>
+                  <div class="small" x-text="lastTrainAlert.body"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {#- other actions #}
+    <div class="col-12 col-lg-5">
+      <div class="card h-100">
+        <div class="card-header"><h2 class="card-title">Other actions</h2></div>
+        <div class="list-group list-group-flush">
+          <div class="list-group-item">
+            <div class="d-flex align-items-start gap-3">
+              <div class="flex-fill">
+                <div class="fw-bold">Reload model</div>
+                <div class="small text-secondary">Load the saved model file again, without retraining.</div>
+              </div>
+              <button type="button" class="btn btn-outline-primary" @click="reloadModel()"
+                      :disabled="!s?.model?.exists || reloading">
+                <i class="ti ti-refresh me-1" aria-hidden="true"></i>Reload
+              </button>
+            </div>
+          </div>
+          <div class="list-group-item">
+            <div class="d-flex align-items-start gap-3">
+              <div class="flex-fill">
+                <div class="fw-bold">Grade new games</div>
+                <div class="small text-secondary">
+                  Auto-backtest: predicts every finished game not graded yet, then updates Elo and the blend weights.
+                  <span x-text="s ? count(s.autobacktest?.total) + ' graded so far.' : ''"></span>
+                </div>
+              </div>
+              <button type="button" class="btn btn-outline-primary" @click="startJob('autobacktest')"
+                      :disabled="!s?.model?.exists || !!$store.jobs.writerBusy || starting === 'autobacktest'"
+                      :title="!s?.model?.exists ? 'Train a model first' : ($store.jobs.writerBusy ? busyText : '')">
+                <i class="ti ti-checklist me-1" aria-hidden="true"></i>Run
+              </button>
+            </div>
+            <div class="small text-secondary mt-1" x-show="!s?.model?.exists" x-cloak>Needs a trained model.</div>
+          </div>
+          <div class="list-group-item">
+            <div class="d-flex align-items-start gap-3">
+              <div class="flex-fill">
+                <div class="fw-bold">Update player impact</div>
+                <div class="small text-secondary">Fetch this season's player stats from NBA.com (about 10 s) for injury adjustments.</div>
+              </div>
+              <button type="button" class="btn btn-outline-primary" @click="startJob('player_impact')"
+                      :disabled="!!demoDate || !!$store.jobs.writerBusy || starting === 'player_impact'"
+                      :title="demoDate ? 'Needs stats.nba.com: not available in demo mode' : ($store.jobs.writerBusy ? busyText : '')">
+                <i class="ti ti-download me-1" aria-hidden="true"></i>Update
+              </button>
+            </div>
+            <div class="small text-secondary mt-1" x-show="demoDate" x-cloak>Not available in demo mode (needs stats.nba.com).</div>
+          </div>
+          <div class="list-group-item">
+            <div class="d-flex align-items-start gap-3">
+              <div class="flex-fill">
+                <div class="fw-bold text-secondary">Build ratings</div>
+                <div class="small text-secondary">Kalman, adjusted and player ratings. Coming with model v6.</div>
+              </div>
+              <button type="button" class="btn btn-outline-secondary" disabled title="Coming with model v6">
+                <i class="ti ti-trophy me-1" aria-hidden="true"></i>Build
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {#- what the model learned #}
+  <div class="row row-cards mb-3">
+    <div class="col-12 col-lg-6">
+      <div class="card h-100">
+        <div class="card-header">
+          <h2 class="card-title">Feature importance</h2>
+        </div>
+        <div class="card-body">
+          <div x-show="!loaded">{{ skeleton_rows(6) }}</div>
+          <div x-show="loaded && importance.length" x-cloak>
+            <div class="chart chart-importance" x-ref="importance" role="img"
+                 aria-label="Feature importance of the trained model, most important first"></div>
+            <details class="mt-2">
+              <summary class="small text-secondary">Show as a table</summary>
+              <table class="table table-sm table-vcenter mt-2 mb-0">
+                <thead><tr><th>Feature</th><th class="text-end">Importance</th></tr></thead>
+                <tbody>
+                  <template x-for="f in importance" :key="f.feature">
+                    <tr><td x-text="featureLabel(f.feature)"></td><td class="text-end num" x-text="$fmt.pct(f.importance, 1)"></td></tr>
+                  </template>
+                </tbody>
+              </table>
+            </details>
+          </div>
+          <p class="text-secondary mb-0" x-show="loaded && !importance.length" x-cloak>
+            Shown after a model is trained.
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-lg-6">
+      <div class="card h-100">
+        <div class="card-header">
+          <h2 class="card-title">Validation reliability {{ glossary_tip("calibration_gap") }}</h2>
+        </div>
+        <div class="card-body">
+          <div x-show="!loaded">{{ skeleton_rows(6) }}</div>
+          <div x-show="loaded && bins.length" x-cloak>
+            <div class="chart chart-reliability" x-ref="reliability" role="img"
+                 aria-label="Predicted home win probability against the actual home win rate on held-out games"></div>
+            <div class="small text-secondary mt-1">
+              Held-out validation games. Dashed line: perfect calibration; dot area is proportional to games in the band.
+            </div>
+            <details class="mt-2">
+              <summary class="small text-secondary">Show as a table</summary>
+              <table class="table table-sm table-vcenter mt-2 mb-0">
+                <thead><tr><th>Band</th><th class="text-end">Games</th><th class="text-end">Mean forecast</th><th class="text-end">Actual</th></tr></thead>
+                <tbody>
+                  <template x-for="b in bins" :key="b.lo">
+                    <tr>
+                      <td class="num" x-text="$fmt.pct(b.lo) + '–' + $fmt.pct(b.hi)"></td>
+                      <td class="text-end num" x-text="b.n"></td>
+                      <td class="text-end num" x-text="$fmt.pct(b.mean_pred, 1)"></td>
+                      <td class="text-end num" x-text="$fmt.pct(b.actual, 1)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </details>
+          </div>
+          <p class="text-secondary mb-0" x-show="loaded && !bins.length" x-cloak>
+            <span x-show="model?.exists">This model was trained before validation curves were saved. Train again to see it.</span>
+            <span x-show="!model?.exists">Shown after a model is trained.</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row row-cards">
+    {#- ensemble weights #}
+    <div class="col-12 col-lg-5">
+      <div class="card h-100">
+        <div class="card-header">
+          <h2 class="card-title">Ensemble weights</h2>
+          <div class="card-actions">
+            <span class="badge bg-secondary-lt" x-text="ensemble?.method === 'blend_v5' ? 'Blend v5' : 'Elo only'"></span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div x-show="!ensemble">{{ skeleton_rows(4) }}</div>
+          <template x-if="ensemble">
+            <div>
+              <p class="small text-secondary" x-show="ensemble.method === 'elo_only'">
+                No trained model: the win probability comes from Elo alone. The blend weights below apply once a model exists.
+              </p>
+              <p class="small text-secondary" x-show="ensemble.method === 'blend_v5'">
+                The final probability is a logistic blend of the three engines; weights are learned from graded games.
+              </p>
+              <table class="table table-sm table-vcenter mb-2">
+                <thead>
+                  <tr><th>Component</th><th class="text-end">Weight</th><th class="text-end">Mean |contribution|</th></tr>
+                </thead>
+                <tbody>
+                  <template x-for="c in blendRows" :key="c.key">
+                    <tr>
+                      <td x-text="c.label"></td>
+                      <td class="text-end num" x-text="$fmt.num(c.coef, 3)"></td>
+                      <td class="text-end num" x-text="c.mean_abs_contribution == null ? '–' : $fmt.num(c.mean_abs_contribution, 3)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <div class="small text-secondary">
+                Bias <span class="num" x-text="$fmt.num(ensemble.calibrator?.bias, 3)"></span>
+                · <span class="num" x-text="count(ensemble.n_updates)"></span> updates
+                · updated <span x-text="$fmt.ago(ensemble.updated_at)"></span>.
+                Contributions are in log-odds on graded games; out-of-sample log loss per component comes with model v6.
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    {#- job history #}
+    <div class="col-12 col-lg-7">
+      <div class="card h-100">
+        <div class="card-header">
+          <h2 class="card-title">Job history</h2>
+          <div class="card-actions">
+            <button type="button" class="btn btn-sm btn-ghost-secondary" @click="loadHistory()" aria-label="Refresh job history">
+              <i class="ti ti-refresh" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table table-sm">
+            <thead><tr><th>Job</th><th>State</th><th>Started</th><th class="text-end">Duration</th><th></th></tr></thead>
+            <tbody>
+              <template x-for="j in history" :key="j.id">
+                <tr>
+                  <td x-text="$store.jobs.label(j)"></td>
+                  <td><span class="badge" :class="stateBadge(j.state)" x-text="stateLabel(j.state)"></span></td>
+                  <td class="text-secondary text-nowrap" x-text="startedText(j)"></td>
+                  <td class="text-end num text-nowrap" x-text="durationText(j)"></td>
+                  <td class="text-end">
+                    <button type="button" class="btn btn-sm btn-ghost-primary" data-bs-toggle="modal" data-bs-target="#job-details"
+                            @click="showJob(j)">Details</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="historyLoaded && !history.length"><td colspan="5" class="text-secondary">No jobs yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {#- job details #}
+  <div class="modal modal-blur fade" id="job-details" tabindex="-1" aria-labelledby="job-details-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 class="modal-title" id="job-details-title" x-text="selected ? $store.jobs.label(selected) + ' · ' + stateLabel(selected.state) : 'Job'"></h3>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" x-show="selected">
+          <dl class="kv mb-3">
+            <dt>Started</dt><dd x-text="startedText(selected)"></dd>
+            <dt>Duration</dt><dd class="num" x-text="durationText(selected)"></dd>
+            <dt>Options</dt><dd x-text="paramsText(selected)"></dd>
+          </dl>
+          <div class="alert alert-danger" x-show="selected?.error" x-text="selected?.error"></div>
+          <template x-if="selected?.result">
+            <div>
+              <h4>Result</h4>
+              <pre class="job-log mb-3" x-text="JSON.stringify(selected.result, null, 2)"></pre>
+            </div>
+          </template>
+          <h4>Log</h4>
+          <pre class="job-log mb-0" x-text="(selected?.log || []).join('\n') || 'No output.'"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% call confirm_modal("confirm-cache", "Clear the API cache?", "Clear cache", "clearCache()") %}
+    Empties <code>nba_cache.db</code> (cached NBA.com team logs). The next predictions download them again, so the first one is slower.
+  {% endcall %}
+</div>
+{% endblock %}
