@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/bigboybigbet/nba_app_quant/actions/workflows/ci.yml"><img src="https://github.com/bigboybigbet/nba_app_quant/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/bigboybigbet/Swish/actions/workflows/ci.yml"><img src="https://github.com/bigboybigbet/Swish/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/season-2026--27-f97316" alt="Season 2026-27">
 </p>
@@ -74,8 +74,8 @@ NBA_HISTORY_DIR=../nba-data-2010-2024 python -m research.benchmark --variants v5
 ### 2. Install
 
 ```bash
-git clone https://github.com/bigboybigbet/nba_app_quant.git
-cd nba_app_quant
+git clone https://github.com/bigboybigbet/Swish.git
+cd Swish
 python -m venv .venv
 ```
 
@@ -109,13 +109,17 @@ The browser opens http://127.0.0.1:8000. Options: `--port 8010` if 8000 is taken
 
 Until this has run once, predictions fall back to plain Elo. Seasons roll forward automatically each October.
 
-### 5. Predict a game
+### 5. Today's slate
+
+The home page (**Slate**) lists every game of the day (US Eastern date; ‹ › or the arrow keys move between days). Press **Run predictions**: each card fills in as its game is predicted, with win %, spread, total and both teams' ratings next to the market line. VIP picks (≥ 65% and both engines agree) and value spots against the market are counted at the top and can be filtered; finished games are marked correct or missed. Click a card for the full analysis.
+
+### 6. Predict a game
 
 Open **Game**, pick the home and away teams, and the app shows the win probability, expected margin (spread), total, the team ratings with their uncertainty, injuries from the ESPN report, and a breakdown of the probability into rating gap, home court, back-to-back and injuries. Enter bookmaker moneylines (or set an Odds API key) to see the edge and a capped Kelly stake.
 
 To keep the ratings current during the season, press **Grade new games** on the Model page after games finish: it grades the new results and rebuilds the ratings.
 
-### 6. Optional keys
+### 7. Optional keys
 
 On the **Settings** page, or in a `.env` file copied from `.env.example`:
 
@@ -126,7 +130,7 @@ On the **Settings** page, or in a `.env` file copied from `.env.example`:
 
 Keys stay in `.env` on your machine (gitignored); the app never sends them to the browser.
 
-### 7. Try it offline (demo mode)
+### 8. Try it offline (demo mode)
 
 Replay any date from 2010-11 to 2023-24 with real historical games, no network needed:
 
@@ -139,12 +143,13 @@ On Windows PowerShell set the variables first: `$env:NBA_HISTORY_DIR="..\nba-dat
 
 ### The previous interface
 
-The Streamlit app still works and uses the same model: `streamlit run nba_app.py`. The Slate, Accuracy, Bets and Ratings pages of the web app are still being built, so use Streamlit for scanning a full day, range backtests and the ROI log until then.
+The Streamlit app still works and uses the same model: `streamlit run nba_app.py`. The Accuracy, Bets and Ratings pages of the web app are still being built, so use Streamlit for range backtests and the ROI log until then.
 
 ### Troubleshooting
 
 | Problem | Fix |
 |---|---|
+| Browser says "can't reach this page" or shows a blank page | Wait for the terminal to print `Ready: open http://127.0.0.1:8000`, then reload. The first start can take up to a minute. Keep the terminal window open while you use the app. |
 | Train fails with a timeout on stats.nba.com | Turn off VPN / proxy and retry; NBA.com rate-limits, so wait a minute between attempts. |
 | `Address already in use` | `python -m server --port 8010` |
 | Predictions say "Elo only" | Run **Train** once (step 4). |

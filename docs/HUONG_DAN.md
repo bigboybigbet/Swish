@@ -30,8 +30,8 @@ Kết quả kiểm tra trên 8.874 trận thật từ mùa 2017-18 đến 2023-2
 **Các bước:**
 
 ```bash
-git clone https://github.com/bigboybigbet/nba_app_quant.git
-cd nba_app_quant
+git clone https://github.com/bigboybigbet/Swish.git
+cd Swish
 python -m venv .venv
 ```
 
@@ -74,6 +74,8 @@ Mỗi lần mở app sau này, bạn chỉ cần vào thư mục dự án, kích
 Trong lúc này app tải các mùa 2023-24 đến 2026-27, tính rating cho cả 30 đội qua từng trận, và lưu vào file `team_strength.json`. Nếu chưa Train lần nào, app chỉ dự đoán bằng Elo đơn giản và hiện nhãn "Elo only". Sau khi Train xong, nhãn sẽ đổi thành "Kalman-Elo v6".
 
 ## Dùng hằng ngày
+
+**Xem lịch hôm nay:** trang chủ (**Slate**) liệt kê mọi trận trong ngày, tính theo ngày giờ miền Đông Mỹ. Dùng nút ‹ › hoặc phím mũi tên để chuyển ngày. Bấm **Run predictions**, mỗi thẻ trận sẽ hiện dần: % thắng, spread, total, rating hai đội và tỷ lệ của nhà cái. Phía trên có bộ đếm kèo VIP (từ 65% trở lên và hai engine cùng đồng ý) và các kèo có lợi thế (value) so với nhà cái, bấm vào để lọc. Trận đã đá xong được đánh dấu đúng/sai. Bấm vào một thẻ để mở phân tích chi tiết.
 
 **Dự đoán một trận:** vào trang **Game** và chọn đội nhà, đội khách. App hiển thị:
 - xác suất thắng và spread;
@@ -123,7 +125,7 @@ NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 python -m s
 
 ## Giao diện cũ (Streamlit)
 
-Các trang Slate (quét cả ngày), Accuracy (backtest), Bets (ROI) và Ratings của web app chưa làm xong. Trong lúc chờ, bạn vẫn dùng được app cũ, chạy cùng model mới:
+Các trang Accuracy (backtest), Bets (ROI) và Ratings của web app chưa làm xong. Trong lúc chờ, bạn vẫn dùng được app cũ, chạy cùng model mới:
 
 ```bash
 streamlit run nba_app.py
@@ -133,6 +135,7 @@ streamlit run nba_app.py
 
 | Lỗi | Cách xử lý |
 |---|---|
+| Trình duyệt báo "can't reach this page" hoặc trang trắng | Đợi terminal in dòng `Ready: open http://127.0.0.1:8000` rồi tải lại trang. Lần chạy đầu có thể mất tới 1 phút. Giữ cửa sổ terminal mở trong suốt lúc dùng app. |
 | Train báo timeout khi kết nối stats.nba.com | Tắt VPN hoặc proxy rồi thử lại. NBA.com giới hạn số lượt gọi, nên hãy đợi khoảng 1 phút giữa các lần thử. |
 | `Address already in use` | Cổng 8000 đang bận. Chạy `python -m server --port 8010` rồi mở http://127.0.0.1:8010 |
 | Dự đoán hiện "Elo only" | Chưa Train. Làm theo mục "Lần đầu: dựng model". |
