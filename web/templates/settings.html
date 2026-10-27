@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% from "_macros.html" import page_header, skeleton_rows, confirm_modal, glossary_tip %}
+
+{% block page_module %}/static/js/pages/settings.js{% endblock %}
+
+{% block page_header %}{{ page_header("Settings") }}{% endblock %}
+
+{% block content %}
+<div x-data="settingsPage" class="settings-page">
+
+  <div class="alert alert-danger" role="alert" x-show="loadError" x-cloak>
+    <div class="d-flex align-items-center gap-2">
+      <i class="ti ti-alert-triangle fs-2" aria-hidden="true"></i>
+      <div class="flex-fill" x-text="loadError"></div>
+      <button type="button" class="btn btn-sm btn-outline-danger" @click="load()">
+        <i class="ti ti-refresh me-1" aria-hidden="true"></i>Retry
+      </button>
+    </div>
+  </div>
+
+  <div class="row row-cards">
+    {#- API keys #}
+    <div class="col-12 col-lg-7">
+      <div class="card">
+        <div class="card-header"><h2 class="card-title">API keys</h2></div>
+        <div class="card-body">
+          <div x-show="!settings">{{ skeleton_rows(6) }}</div>
+          <div x-show="settings" x-cloak>
+            <p class="text-secondary small">
+              Keys are stored in <code>.env</code> on this computer (readable only by your user) and are never sent
+              back to the browser. Environment variables take precedence over <code>.env</code>.
+            </p>
+
+            {#- Odds API #}
+            <h3 class="mb-1">The Odds API</h3>
+            <div class="small mb-2">
+              <span class="badge me-1" :class="secrets.odds_api?.configured ? 'bg-green-lt' : 'bg-secondary-lt'">
+                <i class="ti" :class="secrets.odds_api?.configured ? 'ti-check' : 'ti-minus'" aria-hidden="true"></i>
+                <span x-text="secrets.odds_api?.configured ? 'Configured' : 'Not set'"></span>
+              </span>
+              <span class="text-secondary" x-show="secrets.odds_api?.configured" x-text="sourceText(secrets.odds_api?.source)"></span>
+              <span class="text-secondary" x-show="!secrets.odds_api?.configured">ESPN odds are used without a key.</span>
+            </div>
+            <form class="mb-1" @submit.prevent="saveKeys(['odds_api_key'])" autocomplete="off">
+              <label class="form-label visually-hidden" for="odds-key">New Odds API key</label>
+              <div class="input-group">
+                <input id="odds-key" type="password" class="form-control" autocomplete="new-password" spellcheck="false"
+                       :placeholder="secrets.odds_api?.configured ? 'Replace the key' : 'Paste your key'"
+                       x-model="keys.odds_api_key" maxlength="512">
+                <button type="submit" class="btn btn-primary" :disabled="!keys.odds_api_key.trim() || savingKey">Save</button>
+                <button type="button" class="btn btn-outline-danger" x-show="secrets.odds_api?.source === 'file'"
+                        @click="clearKeys(['odds_api_key'])" :disabled="savingKey">Clear</button>
+              </div>
+            </form>
+            <div class="form-hint mb-4">Free key at the-odds-api.com (500 requests a month). One request returns every NBA game.</div>
+
+            {#- Telegram #}
+            <h3 class="mb-1">Telegram</h3>
+            <div class="small mb-2">
+              <span class="badge me-1" :class="secrets.telegram?.configured ? 'bg-green-lt' : 'bg-secondary-lt'">
+                <i class="ti" :class="secrets.telegram?.configured ? 'ti-check' : 'ti-minus'" aria-hidden="true"></i>
+                <span x-text="telegramStatus"></span>
+              </span>
+              <span class="text-secondary" x-show="secrets.telegram?.configured" x-text="sourceText(secrets.telegram?.source)"></span>
+            </div>
+            <form @submit.prevent="saveKeys(['telegram_token', 'telegram_chat_id'])" autocomplete="off">
+              <div class="row g-2">
+                <div class="col-12 col-md-7">
+                  <label class="form-label" for="tg-token">Bot token</label>
+                  <input id="tg-token" type="password" class="form-control" autocomplete="new-password" spellcheck="false"
+                         :placeholder="secrets.telegram?.token_configured ? 'Set (hidden). Paste to replace' : '123456:ABC…'"
+                         x-model="keys.telegram_token" maxlength="512">
+                </div>
+                <div class="col-12 col-md-5">
+                  <label class="form-label" for="tg-chat">Chat ID</label>
+                  <input id="tg-chat" type="text" class="form-control" autocomplete="off" spellcheck="false" inputmode="numeric"
+                         :placeholder="secrets.telegram?.chat_id_masked || 'e.g. 123456789'"
+                         x-model="keys.telegram_chat_id" maxlength="64">
+                </div>
+              </div>
+              <div class="d-flex flex-wrap gap-2 mt-2">
+                <button type="submit" class="btn btn-primary"
+                        :disabled="!(keys.telegram_token.trim() || keys.telegram_chat_id.trim()) || savingKey">Save</button>
+                <button type="button" class="btn btn-outline-primary" @click="testTelegram()"
+                        :disabled="!secrets.telegram?.configured || tgTesting"
+                        :title="secrets.telegram?.configured ? '' : 'Save a bot token and chat ID first'">
+                  <i class="ti ti-send me-1" aria-hidden="true"></i><span x-text="tgTesting ? 'Sending…' : 'Send test message'"></span>
+                </button>
+                <button type="button" class="btn btn-outline-danger ms-auto"
+                        x-show="secrets.telegram?.token_source === 'file' || secrets.telegram?.chat_id_source === 'file'"
+                        @click="clearKeys(['telegram_token', 'telegram_chat_id'])" :disabled="savingKey">Clear</button>
+              </div>
+            </form>
+            <div class="alert mt-3 mb-0" :class="tgResult?.ok ? 'alert-success' : 'alert-danger'" role="status" x-show="tgResult" x-cloak>
+              <div class="d-flex gap-2">
+                <i class="ti" :class="tgResult?.ok ? 'ti-circle-check' : 'ti-alert-triangle'" aria-hidden="true"></i>
+                <span x-text="tgResult?.ok ? 'Test message sent. Check your Telegram chat.' : tgResult?.detail"></span>
+              </div>
+            </div>
+            <div class="form-hint mt-2">
+              Create a bot with @BotFather (<code>/newbot</code>) for the token; message @userinfobot for your chat ID.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {#- thresholds and stake sizing #}
+    <div class="col-12 col-lg-5">
+      <div class="card">
+        <div class="card-header"><h2 class="card-title">Thresholds and stake sizing</h2></div>
+        <form class="card-body" @submit.prevent="saveThresholds()" novalidate>
+          <div x-show="!settings">{{ skeleton_rows(6) }}</div>
+          <div x-show="settings" x-cloak>
+            <p class="small text-secondary">Applies to new predictions.</p>
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label" for="th-pick">Pick</label>
+                <div class="input-group">
+                  <input id="th-pick" type="number" class="form-control num" min="50" max="90" step="0.5"
+                         x-model.number="form.pick" :class="{'is-invalid': errors.pick}" aria-describedby="th-pick-hint">
+                  <span class="input-group-text">%</span>
+                </div>
+                <div class="form-hint" id="th-pick-hint">Show a pick at or above this win probability.</div>
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="th-safe">Safe</label>
+                <div class="input-group">
+                  <input id="th-safe" type="number" class="form-control num" min="50" max="90" step="0.5"
+                         x-model.number="form.safe" :class="{'is-invalid': errors.safe}" aria-describedby="th-safe-hint">
+                  <span class="input-group-text">%</span>
+                </div>
+                <div class="form-hint" id="th-safe-hint">High confidence from here.</div>
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="th-vip">VIP</label>
+                <div class="input-group">
+                  <input id="th-vip" type="number" class="form-control num" min="50" max="90" step="0.5"
+                         x-model.number="form.vip" :class="{'is-invalid': errors.vip}" aria-describedby="th-vip-hint">
+                  <span class="input-group-text">%</span>
+                </div>
+                <div class="form-hint" id="th-vip-hint">And the engines agree.</div>
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="th-edge">Value edge {{ glossary_tip("edge") }}</label>
+                <div class="input-group">
+                  <input id="th-edge" type="number" class="form-control num" min="0" max="20" step="0.5"
+                         x-model.number="form.value_edge" :class="{'is-invalid': errors.value_edge}" aria-describedby="th-edge-hint">
+                  <span class="input-group-text">%</span>
+                </div>
+                <div class="form-hint" id="th-edge-hint">Model minus fair market probability.</div>
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="k-fraction">Kelly fraction {{ glossary_tip("kelly") }}</label>
+                <input id="k-fraction" type="number" class="form-control num" min="0" max="1" step="0.05"
+                       x-model.number="form.fraction" :class="{'is-invalid': errors.fraction}" aria-describedby="k-fraction-hint">
+                <div class="form-hint" id="k-fraction-hint">0.25 is quarter Kelly.</div>
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="k-cap">Stake cap</label>
+                <div class="input-group">
+                  <input id="k-cap" type="number" class="form-control num" min="0" max="25" step="0.5"
+                         x-model.number="form.cap_pct" :class="{'is-invalid': errors.cap_pct}" aria-describedby="k-cap-hint">
+                  <span class="input-group-text">%</span>
+                </div>
+                <div class="form-hint" id="k-cap-hint">Of bankroll, per bet.</div>
+              </div>
+            </div>
+            <div class="alert alert-danger mt-3 mb-0 py-2" role="alert" x-show="formError" x-text="formError" x-cloak></div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+              <button type="submit" class="btn btn-primary" :disabled="saving || !dirty">Save</button>
+              <button type="button" class="btn btn-outline-secondary" @click="resetDefaults()" :disabled="saving || isDefault">
+                Reset to defaults
+              </button>
+              <span class="small text-secondary ms-auto" x-show="savedAt && !dirty" x-cloak>
+                <i class="ti ti-check text-green" aria-hidden="true"></i> Saved
+              </span>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      {#- display #}
+      <div class="card mt-3">
+        <div class="card-header"><h2 class="card-title">Display</h2></div>
+        <div class="card-body">
+          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+            <div>
+              <div>Odds format</div>
+              <div class="small text-secondary">American (+150 / −180) or decimal (2.50).</div>
+            </div>
+            <div class="btn-group" role="group" aria-label="Odds format">
+              <button type="button" class="btn" :class="$store.prefs.odds === 'us' ? 'btn-primary' : 'btn-outline-secondary'"
+                      :aria-pressed="$store.prefs.odds === 'us'" @click="$store.prefs.setOdds('us')">US</button>
+              <button type="button" class="btn" :class="$store.prefs.odds === 'dec' ? 'btn-primary' : 'btn-outline-secondary'"
+                      :aria-pressed="$store.prefs.odds === 'dec'" @click="$store.prefs.setOdds('dec')">Decimal</button>
+            </div>
+          </div>
+          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div>
+              <div>Theme</div>
+              <div class="small text-secondary">Saved in this browser only.</div>
+            </div>
+            <button type="button" class="btn btn-outline-secondary" @click="$store.prefs.toggleTheme()">
+              <i class="ti hide-theme-dark ti-moon me-1" aria-hidden="true"></i>
+              <i class="ti hide-theme-light ti-sun me-1" aria-hidden="true"></i>
+              <span class="hide-theme-dark">Switch to dark</span><span class="hide-theme-light">Switch to light</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {#- environment #}
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header"><h2 class="card-title">Environment</h2></div>
+        <div class="card-body">
+          <div x-show="!settings">{{ skeleton_rows(3) }}</div>
+          <div class="row g-3" x-show="settings" x-cloak>
+            <div class="col-12 col-md-5">
+              <dl class="kv mb-0">
+                <dt>Version</dt><dd x-text="$store.status.data?.version || '–'"></dd>
+                <dt>Python</dt><dd x-text="server.python"></dd>
+                <dt>Address</dt><dd x-text="server.host ? server.host + ':' + server.port : '–'"></dd>
+                <dt>Project folder</dt><dd class="text-break" x-text="server.root"></dd>
+              </dl>
+            </div>
+            <div class="col-12 col-md-7">
+              <div class="d-flex flex-wrap gap-2">
+                <template x-for="p in packages" :key="p.name">
+                  <span class="badge" :class="p.version ? 'bg-secondary-lt' : 'bg-yellow-lt'">
+                    <i class="ti" :class="p.version ? 'ti-check' : 'ti-alert-triangle'" aria-hidden="true"></i>
+                    <span x-text="p.name + ' ' + (p.version || 'not installed')"></span>
+                  </span>
+                </template>
+              </div>
+              <div class="small text-secondary mt-2" x-show="packages.some(p => !p.version)">
+                shap and optuna are optional: <code>pip install shap optuna</code> adds SHAP explanations and Optuna tuning.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {#- danger zone: last on every screen size #}
+    <div class="col-12">
+      <div class="card border-danger danger-zone">
+        <div class="card-header">
+          <h2 class="card-title text-danger"><i class="ti ti-alert-octagon me-1" aria-hidden="true"></i>Danger zone</h2>
+          <div class="card-actions small text-secondary" x-show="busy" x-cloak x-text="busyText"></div>
+        </div>
+        <div class="list-group list-group-flush">
+          <template x-for="d in dangerActions" :key="d.key">
+            <div class="list-group-item">
+              <div class="row align-items-center g-2">
+                <div class="col">
+                  <div class="fw-bold" x-text="d.title"></div>
+                  <div class="small text-secondary"><code x-text="d.file"></code> · <span x-text="d.effect"></span></div>
+                </div>
+                <div class="col-12 col-sm-auto">
+                  <button type="button" class="btn btn-outline-danger w-100" data-bs-toggle="modal" :data-bs-target="'#confirm-' + d.key"
+                          :disabled="!!busy || dangerBusy === d.key" :title="busy ? busyText : ''">
+                    <i class="ti ti-trash me-1" aria-hidden="true"></i><span x-text="d.button"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% call confirm_modal("confirm-model", "Delete the trained model?", "Delete model", "danger('model')") %}
+    Deletes <code x-text="files.model"></code> and its saved metrics. Predictions fall back to Elo + Monte Carlo
+    until you train again (about 10 minutes).
+  {% endcall %}
+  {% call confirm_modal("confirm-dataset", "Delete the training dataset?", "Delete dataset", "danger('dataset')") %}
+    Deletes <code x-text="files.dataset"></code>. The next training run downloads 3 seasons from NBA.com again.
+  {% endcall %}
+  {% call confirm_modal("confirm-elo", "Reset Elo ratings?", "Reset Elo", "danger('elo')") %}
+    Deletes <code x-text="files.elo"></code>. Every team falls back to 1500 until the next training run rebuilds the ratings.
+  {% endcall %}
+  {% call confirm_modal("confirm-cache", "Clear the API cache?", "Clear cache", "danger('cache')") %}
+    Empties <code x-text="files.cache"></code> (cached NBA.com team logs). The next predictions download them again,
+    so the first one is slower.
+  {% endcall %}
+</div>
+{% endblock %}

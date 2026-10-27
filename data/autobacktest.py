@@ -7,6 +7,7 @@ from nba_api.stats.endpoints import leaguegamefinder
 from nba_api.stats.static import teams as nba_teams_static
 
 from config import recent_seasons
+from data.atomic import atomic_path, atomic_write_json
 from data.elo import load_elo, save_elo, update_elo_game
 from engine.features import get_team_advanced_stats
 from engine.models import BlendCalibrator, predict_hybrid
@@ -32,8 +33,7 @@ def load_log() -> set:
 def _save_log(new_ids: set):
     existing = load_log()
     all_ids  = existing | new_ids
-    with open(AUTOBACKTEST_LOG, "w") as f:
-        json.dump({"processed_game_ids": list(all_ids), "total": len(all_ids)}, f)
+    atomic_write_json(AUTOBACKTEST_LOG, {"processed_game_ids": list(all_ids), "total": len(all_ids)})
 
 
 def log_stats() -> dict:
@@ -49,10 +49,9 @@ def _append_to_csv(rows: list):
         return
     new_df = pd.DataFrame(rows)
     if os.path.exists(AUTOBACKTEST_CSV):
-        existing = pd.read_csv(AUTOBACKTEST_CSV)
-        pd.concat([existing, new_df], ignore_index=True).to_csv(AUTOBACKTEST_CSV, index=False)
-    else:
-        new_df.to_csv(AUTOBACKTEST_CSV, index=False)
+        new_df = pd.concat([pd.read_csv(AUTOBACKTEST_CSV), new_df], ignore_index=True)
+    with atomic_path(AUTOBACKTEST_CSV) as tmp:
+        new_df.to_csv(tmp, index=False)
 
 
 def _fetch_new_games(status_cb=None) -> pd.DataFrame:
@@ -80,6 +79,9 @@ def _fetch_new_games(status_cb=None) -> pd.DataFrame:
     df = pd.concat(all_games, ignore_index=True)
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"])
     df = df[df["WL"].isin(["W", "L"])]
+    # Regular season, playoffs and play-in only: preseason games used to slip
+    # through here and move live Elo and the calibrator.
+    df = df[df["GAME_ID"].astype(str).str.zfill(10).str[:3].isin(("002", "004", "005"))]
 
     home_df = df[df["MATCHUP"].str.contains(r"vs\.", na=False)].copy()
     away_df = df[df["MATCHUP"].str.contains("@", na=False)].copy()
@@ -102,13 +104,18 @@ def _fetch_new_games(status_cb=None) -> pd.DataFrame:
                    "HOME_WON", "MARGIN"]]
 
 
-def run_auto_backtest(model, status_cb=None) -> dict:
+def run_auto_backtest(model, status_cb=None, should_stop=None, progress_cb=None) -> dict:
     """
     Blindfold-predict all new completed games.
 
     For every game result the BlendCalibrator receives one online
     gradient-descent update — this is how the model adapts after backtest
     without corrupting the training dataset.
+
+    should_stop() is checked before each game; when it returns True the loop
+    stops and the games graded so far are still saved (Elo, calibrator, log),
+    so a cancelled run never re-grades them. progress_cb(done, total) is
+    called before each game.
     """
     def report(msg):
         if status_cb:
@@ -131,8 +138,15 @@ def run_auto_backtest(model, status_cb=None) -> dict:
     # Elo evolves chronologically as games are replayed — each prediction
     # uses the pre-game rating, then the result updates it.
     elo_dict = load_elo()
+    stopped  = False
 
     for i, row in new_games.iterrows():
+        if should_stop and should_stop():
+            stopped = True
+            report(f"Stopped after {i}/{total} games; saving what was graded…")
+            break
+        if progress_cb:
+            progress_cb(i, total)
         game_date = row["GAME_DATE"].date()
         home_name = _team_name(row["HOME_TEAM_ID"])
         away_name = _team_name(row["AWAY_TEAM_ID"])
@@ -159,7 +173,8 @@ def run_auto_backtest(model, status_cb=None) -> dict:
                 correct += 1
 
             elo_diff = hd.get("ELO", 1500) - ad.get("ELO", 1500)
-            calib_updates.append((xgb_p, mc_p, elo_diff, actual))
+            if xgb_p is not None:
+                calib_updates.append((xgb_p, mc_p, elo_diff, actual))
 
             csv_rows.append({
                 "GAME_ID":       row["GAME_ID"],
@@ -200,6 +215,15 @@ def run_auto_backtest(model, status_cb=None) -> dict:
     _append_to_csv(csv_rows)
     _save_log(processed_ids)
 
+    # Rebuild the team strength ratings from scratch so they include the new
+    # results (a full replay: no game can be counted twice).
+    if actual_processed:
+        try:
+            from engine import team_strength
+            team_strength.refresh(status_cb=report)
+        except Exception as e:
+            report(f"Team strength not refreshed: {e}")
+
     acc = correct / actual_processed if actual_processed > 0 else 0.0
     report(
         f"Done — {actual_processed} new games · "
@@ -214,4 +238,5 @@ def run_auto_backtest(model, status_cb=None) -> dict:
         "acc":        acc,
         "metrics":    None,              # XGBoost retrain is manual via sidebar
         "calibrator": calibrator.summary(),
+        "stopped":    stopped,
     }

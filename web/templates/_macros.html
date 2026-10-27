@@ -183,3 +183,28 @@
   </div>
 </div>
 {%- endmacro %}
+
+{#- A running job: stage, elapsed time, bar (indeterminate when progress is null) and Cancel.
+    job_expr → a $store.jobs entry, or null (then nothing shows). -#}
+{% macro job_progress(job_expr, cancel=True) -%}
+<div class="job-progress" x-show="{{ job_expr }}" x-cloak>
+  <div class="d-flex justify-content-between align-items-baseline gap-2 small mb-1">
+    <span class="text-truncate" x-text="$store.jobs.stageText({{ job_expr }})"></span>
+    <span class="text-secondary num text-nowrap" x-text="$store.jobs.elapsed({{ job_expr }})"></span>
+  </div>
+  <div class="d-flex align-items-center gap-2">
+    <div class="progress flex-fill" role="progressbar"
+         :aria-label="$store.jobs.label({{ job_expr }}) + ' progress'"
+         :aria-valuenow="$store.jobs.pct({{ job_expr }})" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-bar" :class="$store.jobs.pct({{ job_expr }}) == null ? 'progress-bar-indeterminate' : ''"
+           :style="$store.jobs.pct({{ job_expr }}) != null ? {width: $store.jobs.pct({{ job_expr }}) + '%'} : {}"></div>
+    </div>
+    {%- if cancel %}
+    <button type="button" class="btn btn-sm btn-outline-danger" :disabled="({{ job_expr }})?.cancelling"
+            @click="$store.jobs.cancel(({{ job_expr }}).id)">
+      <i class="ti ti-player-stop me-1" aria-hidden="true"></i>Cancel
+    </button>
+    {%- endif %}
+  </div>
+</div>
+{%- endmacro %}

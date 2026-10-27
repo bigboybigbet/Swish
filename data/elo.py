@@ -2,6 +2,7 @@ import json
 import os
 
 from config import ELO_FILE, ELO_K, ELO_DEFAULT, ELO_HOME_ADV
+from data.atomic import atomic_write_json
 
 
 def load_elo() -> dict:
@@ -12,8 +13,7 @@ def load_elo() -> dict:
 
 
 def save_elo(d: dict):
-    with open(ELO_FILE, "w") as f:
-        json.dump(d, f)
+    atomic_write_json(ELO_FILE, d)
 
 
 def elo_expected(ra: float, rb: float) -> float:

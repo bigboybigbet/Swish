@@ -16,6 +16,13 @@ def isolated(tmp_path, monkeypatch):
     from server import paths
     monkeypatch.setattr(paths, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(paths, "SETTINGS_FILE", tmp_path / "settings.json")
+    # runs/ state (jobs.json is rewritten at app startup): never the real one.
+    runs = tmp_path / "runs"
+    monkeypatch.setattr(paths, "RUNS_DIR", runs)
+    monkeypatch.setattr(paths, "JOBS_FILE", runs / "jobs.json")
+    monkeypatch.setattr(paths, "RESULTS_DIR", runs / "results")
+    monkeypatch.setattr(paths, "SCANS_DIR", runs / "scans")
+    monkeypatch.setattr(paths, "SNAPSHOTS_DIR", runs / "ratings_snapshots")
     for var in (*SECRET_VARS, "NBA_QUANT_DEMO_DATE", "NBA_HOST", "NBA_PORT"):
         monkeypatch.setenv(var, "")   # records the original, so values set by code under test are undone
         monkeypatch.delenv(var)
@@ -33,3 +40,11 @@ def client(app):
     from fastapi.testclient import TestClient
     with TestClient(app, base_url=BASE_URL, client=("127.0.0.1", 50000)) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _no_nba_api_downloads(monkeypatch):
+    """No test may download season logs: on CI stats.nba.com hangs until its
+    timeout instead of failing fast.  Tests that need logs pass them in."""
+    import engine.models
+    monkeypatch.setattr(engine.models, "fetch_game_logs", lambda *a, **k: None)

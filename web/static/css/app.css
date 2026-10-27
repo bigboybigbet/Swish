@@ -109,3 +109,39 @@
 
 /* ── accessibility ──────────────────────────────────────────────────────── */
 .skip-link { z-index: 2000; }
+
+/* ── jobs, Model and Settings pages (M2) ───────────────────────────────── */
+/* Compact key/value lists in status cards. */
+.kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .125rem .75rem; font-size: .875rem; }
+.kv dt { font-weight: 400; color: var(--tblr-secondary); }
+.kv dd { margin: 0; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kv dd.text-break { white-space: normal; }
+
+/* Job log tails and raw results. */
+.job-log {
+  max-height: 14rem;
+  overflow: auto;
+  padding: .5rem .75rem;
+  font-size: .75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--tblr-body-color);
+  background: var(--tblr-bg-surface-secondary);
+  border: 1px solid var(--tblr-border-color);
+  border-radius: var(--tblr-border-radius);
+}
+.job-progress .progress { height: .5rem; }
+
+/* The running-job card stays at the top while scrolling on phones. */
+@media (max-width: 767.98px) {
+  .job-card { position: sticky; top: calc(3.5rem + .5rem); z-index: 1010; box-shadow: var(--tblr-shadow-dropdown); }
+  .job-card .job-log { max-height: 7rem; }
+}
+
+.chart-importance { height: 22rem; }
+.chart-reliability { height: 18rem; }
+@media (max-width: 767.98px) { .chart-reliability { height: 15rem; } }
+
+/* Danger zone. */
+.danger-zone .list-group-item { background: transparent; }

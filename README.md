@@ -10,12 +10,14 @@
 
 NBA Quant predicts every NBA game before tip-off: the home team's win probability, the expected margin, and the expected total, with Monte Carlo ranges around both. It runs locally, pulls game logs from the official stats API, adjusts for injuries from the ESPN report, and compares its numbers with bookmaker odds to flag value.
 
+The model rates every team in points above average, with an uncertainty band, using a Kalman filter: each result moves a team's rating by an amount that depends on how sure the model already was, ratings regress 20% toward average each summer, and the second night of a back-to-back costs a point. The expected margin becomes a win probability through a logistic curve fitted on the last three seasons.
+
 Every modelling change is judged on the same yardstick: a walk-forward backtest over seven held-out seasons (8,874 real games) in which the model only ever sees games played before the one it predicts.
 
 ## What it does
 
 - Predicts a single matchup or scans a full day's slate, with win probability, spread, total and confidence
-- Tracks team strength with a margin-of-victory Elo rating that updates after every game
+- Rates every team in points with a Kalman-filter Elo that updates after every game, with an uncertainty band
 - Adjusts both teams for injured players, weighted by status (out, doubtful, questionable, day-to-day)
 - Simulates 50,000 correlated score pairs per game for spread and total ranges
 - Converts bookmaker moneylines to implied probabilities and sizes stakes with a fractional Kelly criterion
@@ -26,17 +28,14 @@ Every modelling change is judged on the same yardstick: a walk-forward backtest 
 
 ```mermaid
 flowchart LR
-    A[nba_api game logs] --> F[Pre-game features<br/>rolling form, Four Factors,<br/>rest, venue splits]
-    A --> E[MOV Elo<br/>replayed game by game]
-    I[ESPN injury report] --> J[Injury adjustment]
-    F --> X[Gradient-boosted model<br/>+ Platt calibration]
-    E --> X
-    J --> X
+    A[nba_api game logs] --> T[Kalman-Elo team strength<br/>rating ± sd per team,<br/>season regression, back-to-back]
+    I[ESPN injury report] --> J[Injury points]
+    T --> L[Expected margin]
+    J --> L
+    L --> P[Win probability · spread]
+    A --> F[Rolling team form]
     F --> M[Correlated Monte Carlo<br/>score simulation]
-    X --> B[Blend layer]
-    M --> B
-    E --> B
-    B --> P[Win probability<br/>spread · total]
+    M --> Q[Total and score ranges]
     O[Bookmaker odds] --> K[Edge + Kelly stake]
     P --> K
 ```
@@ -47,29 +46,35 @@ Each training row is one game seen from the home side: home-minus-away differenc
 
 `research/benchmark.py` trains on three seasons, freezes the model, and predicts the next season game by game, for every season from 2017-18 to 2023-24. Lower log loss is better; a coin flip scores 0.693.
 
-| Model | Log loss | Brier | Accuracy |
-|---|---:|---:|---:|
-| Margin-of-victory Elo | 0.634 | 0.221 | 64.0% |
-| Gradient-boosted model, v5 | 0.652 | 0.230 | 62.6% |
+| Model | Log loss | Accuracy |
+|---|---:|---:|
+| **Kalman-Elo team strength, v6 (current)** | **0.628** | **64.5%** |
+| Margin-of-victory Elo | 0.634 | 64.0% |
+| Gradient-boosted model, v5 | 0.652 | 62.6% |
 
-The plain Elo rating beats the v5 gradient-boosted model by 0.019 log loss per game (standard error 0.003): with these features the tree model overfits. The next model version replaces it with team and player rating systems combined by a stacked ensemble, and only components that beat this table on the held-out seasons will ship. Reproduce the table with:
+v6 beats the plain Elo rating by 0.005 log loss per game (standard error 0.001) and the v5 gradient-boosted model by 0.024; the tree model overfit its rolling features. Opponent-adjusted ridge ratings scored the same as v6 (0.628), and stacking several team ratings added nothing measurable because they are 98% correlated. Standings incentives (tanking, resting, seeding) are real but added only 0.0008 on top of the ratings, below the significance bar, so they are not in the model. Reproduce the table with:
 
 ```bash
 git clone --depth 1 https://github.com/NocturneBear/NBA-Data-2010-2024 ../nba-data-2010-2024
-NBA_HISTORY_DIR=../nba-data-2010-2024 python -m research.benchmark --variants v5,elo
+NBA_HISTORY_DIR=../nba-data-2010-2024 python -m research.benchmark --variants v5,elo,elo_plus --reference elo
 ```
 
 ## Quick start
+
+The app now runs as a local web app (FastAPI + HTML, no build step, works offline). The Streamlit app still works while the remaining pages are built.
 
 ```bash
 git clone https://github.com/bigboybigbet/nba_app_quant.git
 cd nba_app_quant
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-streamlit run nba_app.py
+python -m server                 # web app on http://127.0.0.1:8000
+streamlit run nba_app.py         # previous interface, still available
 ```
 
-On first launch, press **Train / Reload Model** with *Force full rebuild*. The app downloads the 2024-25, 2025-26 and current 2026-27 seasons, replays Elo through every game, and trains the model (a few minutes). Training seasons roll forward automatically each October.
+Web pages so far: Game (single-game analysis with the probability breakdown), Model (train, auto-backtest, player impact, with live progress) and Settings (API keys stored in `.env`, never sent to the browser). Slate, Accuracy, Bets and Ratings are next. Try it without network access by replaying a past date: `NBA_QUANT_DEMO_DATE=2024-03-15 python -m server`, with the historical logs from the benchmark section in `NBA_HISTORY_DIR`.
+
+On first launch, press **Train** (*Force full rebuild*). The app downloads the 2023-24 to 2026-27 seasons, replays the team-strength ratings through every game, and trains the reference models (a few minutes). Training seasons roll forward automatically each October.
 
 Optional keys, entered in the app's settings tab and kept only in memory for the session: a [The Odds API](https://the-odds-api.com) key for live moneylines, and a Telegram bot token and chat ID for pushing picks.
 

@@ -88,7 +88,9 @@ def get_team_advanced_stats(team_name: str, target_date=None, window: int = 10) 
         wpct10   = float((r10["WL"] == "W").mean())
 
         last_game = df["GAME_DATE"].iloc[-1]
-        ref_date  = pd.to_datetime(target_date) if target_date else pd.Timestamp.today()
+        # NBA dates are US Eastern; the user's own clock may be a day ahead.
+        ref_date  = (pd.to_datetime(target_date) if target_date
+                     else pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None))
         days_rest = int(np.clip((ref_date - last_game).days, 1, 10))
 
         avg_pts     = r10["PTS"].mean()
@@ -99,6 +101,7 @@ def get_team_advanced_stats(team_name: str, target_date=None, window: int = 10) 
         return {
             "name":            full_name,
             "team_id":         team_id,
+            "GAME_DATE":       str(ref_date.date()),
             # ── v5 model features ─────────────────────────────────────
             "ELO":             get_team_elo(full_name),
             "NET5":            float(r5["PLUS_MINUS"].mean()),

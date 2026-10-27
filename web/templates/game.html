@@ -1,0 +1,562 @@
+{% extends "base.html" %}
+{% from "_macros.html" import page_header, empty_state, stat_tile, team_badge, prob_split_bar,
+                              confidence_badge, edge_badge, glossary_tip, skeleton_rows %}
+
+{% block page_module %}/static/js/pages/game.js{% endblock %}
+
+{% block head %}
+<style>
+  .game-hero .hero-prob { font-size: 2.75rem; font-weight: 700; line-height: 1; }
+  .game-hero .hero-at { font-size: 1.25rem; color: var(--tblr-secondary); }
+  .game-hero .prob-split { height: .75rem; }
+  .game-tiles .stat-tile .h2 { font-size: 1.15rem; }
+  .chart-box { height: 320px; width: 100%; }
+  .chart-box.chart-sm { height: 280px; }
+  .chart-box.chart-tall { height: 420px; }
+  .section-toggle { all: unset; box-sizing: border-box; display: flex; align-items: center; width: 100%; cursor: pointer; }
+  .section-toggle:focus-visible { outline: 2px solid var(--tblr-primary); outline-offset: 2px; }
+  .section-toggle .ti-chevron-down { transition: transform .2s ease; }
+  .section-toggle[aria-expanded="false"] .ti-chevron-down { transform: rotate(-90deg); }
+  .compare-table td, .compare-table th { padding: .35rem .5rem; }
+  .compare-table .metric { color: var(--tblr-secondary); text-align: center; white-space: nowrap; }
+  .compare-table .v6 { opacity: .55; }
+  .rank-chip { font-size: .7rem; vertical-align: middle; }
+  .odds-input { max-width: 8rem; }
+  .legend-line { display: inline-block; width: 1.25rem; height: 0; margin-right: .35rem; vertical-align: middle; border-top: 2px solid; }
+  .legend-even { border-color: var(--tblr-secondary); }
+  .legend-model { border-color: var(--tblr-body-color); }
+  .legend-market { border-top-style: dashed; border-color: var(--tblr-orange); }
+  .legend-band { display: inline-block; width: 1rem; height: .7rem; margin-right: .35rem; vertical-align: middle; background: rgba(120,130,150,.25); }
+  .ladder-up { color: var(--tblr-green); }
+  .ladder-down { color: var(--tblr-red); }
+  @media (max-width: 767.98px) {
+    .chart-box, .chart-box.chart-sm, .chart-box.chart-tall { height: 240px; }
+    .game-hero .hero-prob { font-size: 2.25rem; }
+    .game-hero .hero-side.home { text-align: start !important; }
+  }
+</style>
+{% endblock %}
+
+{% block page_header %}{{ page_header("Game", "Matchup analysis") }}{% endblock %}
+
+{% block content %}
+<div x-data="gamePage">
+
+  {#- ── input bar ─────────────────────────────────────────────────────── #}
+  <form class="card mb-3" @submit.prevent="analyze()" novalidate>
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md">
+          <label class="form-label" for="away-team">Away</label>
+          <select id="away-team" class="form-select" x-model="awayId" @change="teamsChanged()"
+                  :class="sameTeam ? 'is-invalid' : ''">
+            <option value="">Choose a team…</option>
+            <template x-for="t in teamList" :key="t.id">
+              <option :value="String(t.id)" :selected="String(t.id) === awayId" x-text="t.name"></option>
+            </template>
+          </select>
+        </div>
+        <div class="col-auto">
+          <button type="button" class="btn btn-icon btn-outline-secondary" @click="swap()"
+                  title="Swap home and away" aria-label="Swap home and away">
+            <i class="ti ti-arrows-left-right" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="col-12 col-md">
+          <label class="form-label" for="home-team">Home</label>
+          <select id="home-team" class="form-select" x-model="homeId" @change="teamsChanged()"
+                  :class="sameTeam ? 'is-invalid' : ''">
+            <option value="">Choose a team…</option>
+            <template x-for="t in teamList" :key="t.id">
+              <option :value="String(t.id)" :selected="String(t.id) === homeId" x-text="t.name"></option>
+            </template>
+          </select>
+        </div>
+        <div class="col-12 col-sm-6 col-md-auto">
+          <label class="form-label" for="game-date">Date (ET)</label>
+          <input id="game-date" type="date" class="form-control" x-model="date" @change="teamsChanged()" required>
+        </div>
+      </div>
+
+      <div class="row g-2 mt-1 align-items-end">
+        <div class="col-6 col-md-auto">
+          <label class="form-label" for="away-odds">
+            Away price <span class="text-secondary" x-text="oddsMode === 'dec' ? '(DEC)' : '(US)'"></span>
+          </label>
+          <input id="away-odds" type="text" inputmode="decimal" class="form-control odds-input num"
+                 x-model="oddsText.away" @change="oddsInput('away')" :placeholder="oddsPlaceholder"
+                 :class="oddsInvalid('away') ? 'is-invalid' : ''" autocomplete="off">
+        </div>
+        <div class="col-6 col-md-auto">
+          <label class="form-label" for="home-odds">
+            Home price <span class="text-secondary" x-text="oddsMode === 'dec' ? '(DEC)' : '(US)'"></span>
+          </label>
+          <input id="home-odds" type="text" inputmode="decimal" class="form-control odds-input num"
+                 x-model="oddsText.home" @change="oddsInput('home')" :placeholder="oddsPlaceholder"
+                 :class="oddsInvalid('home') ? 'is-invalid' : ''" autocomplete="off">
+        </div>
+        <div class="col-auto">
+          <button type="button" class="btn btn-outline-primary" @click="fetchOdds()" :disabled="oddsBusy"
+                  title="Look up the market moneyline (The Odds API if a key is set, else ESPN)">
+            <span class="spinner-border spinner-border-sm me-1" x-show="oddsBusy" x-cloak aria-hidden="true"></span>
+            <i class="ti ti-refresh me-1" x-show="!oddsBusy" aria-hidden="true"></i>Auto-fetch
+          </button>
+          <button type="button" class="btn btn-link px-1" x-show="oddsSource" x-cloak @click="clearOdds(); oddsInfo = null"
+                  title="Clear the prices">Clear</button>
+        </div>
+        <div class="col-12 col-md-auto ms-md-auto">
+          <div class="form-label">Injuries</div>
+          <div class="btn-group" role="group" aria-label="Injuries">
+            <template x-for="m in [['live', 'Live'], ['none', 'None'], ['custom', 'Custom']]" :key="m[0]">
+              <button type="button" class="btn" :class="injMode === m[0] ? 'btn-primary' : 'btn-outline-secondary'"
+                      :aria-pressed="injMode === m[0]" @click="setInjMode(m[0])" x-text="m[1]"></button>
+            </template>
+          </div>
+          <button type="button" class="btn btn-link px-1" x-ref="injEdit" x-show="injMode === 'custom'" x-cloak
+                  data-bs-toggle="offcanvas" data-bs-target="#injuries-offcanvas" aria-controls="injuries-offcanvas">
+            Edit…
+          </button>
+        </div>
+        <div class="col-12 col-md-auto">
+          <button type="submit" class="btn btn-primary w-100" :disabled="loading">
+            <span class="spinner-border spinner-border-sm me-2" x-show="loading" x-cloak aria-hidden="true"></span>
+            <i class="ti ti-chart-arrows-vertical me-1" x-show="!loading" aria-hidden="true"></i>Analyze
+          </button>
+        </div>
+      </div>
+
+      <div class="small mt-2" x-show="oddsInfo" x-cloak
+           :class="{ok: 'text-secondary', muted: 'text-secondary', warning: 'text-warning', danger: 'text-danger'}[oddsInfo?.kind]">
+        <i class="ti ti-broadcast me-1" aria-hidden="true"></i><span x-text="oddsInfo?.text"></span>
+      </div>
+      <div class="small mt-2 text-secondary" x-show="oddsSource === 'manual' && !oddsInfo" x-cloak>
+        <i class="ti ti-pencil me-1" aria-hidden="true"></i>Manual prices: Kelly and edge use them.
+      </div>
+      <div role="alert" x-show="formError || sameTeam" x-cloak>
+        <div class="invalid-feedback d-block mt-2" x-text="formError || 'Home and away must be different teams.'"></div>
+      </div>
+    </div>
+  </form>
+
+  {#- ── states ───────────────────────────────────────────────────────── #}
+  <div x-show="!result && !loading && !error" x-cloak>
+    <div class="card"><div class="card-body">
+      {{ empty_state("vs", "Pick two teams",
+                     "Choose the away and home team and a date, then Analyze. Odds are optional: without them the market lookup is used.") }}
+    </div></div>
+  </div>
+
+  <div x-show="loading" x-cloak aria-live="polite">
+    <div class="card mb-3 placeholder-glow" aria-hidden="true">
+      <div class="card-body">
+        <div class="row align-items-center">
+          <div class="col"><div class="placeholder col-6 mb-2"></div><div class="placeholder placeholder-lg col-3"></div></div>
+          <div class="col text-end"><div class="placeholder col-6 mb-2"></div><div class="placeholder placeholder-lg col-3"></div></div>
+        </div>
+        <div class="placeholder col-12 mt-3"></div>
+      </div>
+    </div>
+    <p class="text-secondary"><span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+      <span x-text="slow ? 'Fetching team logs (first run can take ~10 s)…' : 'Running 50,000 simulations…'"></span></p>
+    {{ skeleton_rows(4) }}
+  </div>
+
+  <div x-show="error && !loading" x-cloak>
+    <template x-if="errorKind === 'inline'">
+      <div class="alert alert-warning" role="alert">
+        <div class="d-flex gap-2">
+          <i class="ti ti-alert-circle fs-2" aria-hidden="true"></i>
+          <div><div x-text="error?.detail || error?.message"></div>
+            <div class="text-secondary small" x-show="error?.hint" x-text="error?.hint"></div></div>
+        </div>
+      </div>
+    </template>
+    <template x-if="errorKind === 'card'">
+      <div class="card card-md border-danger">
+        <div class="card-body">
+          <h3 class="card-title text-danger"><i class="ti ti-cloud-off me-1" aria-hidden="true"></i>Could not analyze this game</h3>
+          <p x-text="error?.detail || error?.message"></p>
+          <p class="text-secondary small" x-show="error?.hint" x-text="error?.hint"></p>
+          <button type="button" class="btn btn-outline-danger" @click="analyze()">
+            <i class="ti ti-refresh me-1" aria-hidden="true"></i>Retry
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  {#- ── result ───────────────────────────────────────────────────────── #}
+  <template x-if="result && v && !loading">
+    <div>
+      {#- hero: away @ home #}
+      <div class="card mb-3 game-hero">
+        <div class="card-body">
+          <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center small text-secondary mb-3">
+            <span><i class="ti ti-clock me-1" aria-hidden="true"></i><span x-text="v.when"></span>
+              · <span x-text="v.status"></span></span>
+            <span class="d-flex gap-1 flex-wrap">
+              <span class="badge bg-azure-lt" x-show="result.mode === 'elo_only'">Elo only</span>
+              <span class="badge bg-azure-lt" x-show="result.mode === 'blend_v5'">Blend v5</span>
+              <span class="badge bg-azure-lt" x-show="result.mode === 'stacked_v6'">Stacked v6</span>
+            </span>
+          </div>
+          <div class="row align-items-center g-3">
+            <div class="col-12 col-md-5 hero-side away">
+              <div class="d-flex align-items-center gap-2 mb-1">
+                {{ team_badge("v.away", "badge-lg") }}
+                <div>
+                  <div class="h3 mb-0" x-text="v.away.name"></div>
+                  <div class="small text-secondary">Away · Elo <span class="num" x-text="$fmt.num(result.ratings.away.elo, 0)"></span></div>
+                </div>
+              </div>
+              <div class="hero-prob num" x-text="$fmt.pct(result.win_prob.away)"></div>
+            </div>
+            <div class="col-12 col-md-2 text-center hero-at d-none d-md-block" aria-hidden="true">@</div>
+            <div class="col-12 col-md-5 hero-side home text-md-end">
+              <div class="d-flex align-items-center gap-2 mb-1 justify-content-md-end">
+                <div class="order-2 order-md-1 text-md-end">
+                  <div class="h3 mb-0" x-text="v.home.name"></div>
+                  <div class="small text-secondary">Home · Elo <span class="num" x-text="$fmt.num(result.ratings.home.elo, 0)"></span></div>
+                </div>
+                <span class="order-1 order-md-2">{{ team_badge("v.home", "badge-lg") }}</span>
+              </div>
+              <div class="hero-prob num" x-text="$fmt.pct(result.win_prob.home)"></div>
+            </div>
+          </div>
+          <div class="my-3">{{ prob_split_bar("v.home", "v.away", "result.win_prob.home") }}</div>
+
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <template x-if="v.pickKind === 'conflict'">
+              <div class="text-warning fw-bold"><i class="ti ti-alert-triangle me-1" aria-hidden="true"></i><span x-text="v.pickLine"></span></div>
+            </template>
+            <template x-if="v.pickKind !== 'conflict'">
+              <div class="fw-bold" :class="v.pickKind === 'pick' ? '' : 'text-secondary'">
+                <i class="ti me-1" :class="v.pickKind === 'pick' ? 'ti-target-arrow' : 'ti-scale'" aria-hidden="true"></i><span x-text="v.pickLine"></span>
+              </div>
+            </template>
+            {{ confidence_badge("result.pick.tier") }}
+            <span class="badge bg-green-lt" x-show="result.flags.safe" title="Confidence at or above the safe threshold, engines agree"><i class="ti ti-shield-check me-1" aria-hidden="true"></i>SAFE</span>
+            <span class="badge bg-purple-lt" x-show="result.flags.vip" title="VIP pick: high confidence and no engine conflict"><i class="ti ti-star me-1" aria-hidden="true"></i>VIP</span>
+            <span class="badge bg-teal-lt" x-show="result.flags.value" title="Edge over the market's fair price at or above the value threshold"><i class="ti ti-coin me-1" aria-hidden="true"></i>VALUE</span>
+          </div>
+          <div class="small text-secondary mt-1" x-text="v.engines"></div>
+
+          <div class="d-flex flex-wrap align-items-center gap-2 mt-2 small">
+            <i class="ti ti-building-bank text-secondary" aria-hidden="true"></i>
+            <span x-text="v.marketLine"></span>
+            <template x-if="v.value">{{ edge_badge("v.value.edge", "v.value.label") }}</template>
+          </div>
+
+          <template x-if="v.final">
+            <div class="mt-2">
+              <span class="badge" :class="v.final.correct ? 'bg-green-lt' : 'bg-red-lt'">
+                <i class="ti me-1" :class="v.final.correct ? 'ti-check' : 'ti-x'" aria-hidden="true"></i>
+                <span x-text="v.final.correct ? 'Correct' : 'Incorrect'"></span>
+              </span>
+              <span class="ms-1 num" x-text="v.final.text"></span>
+            </div>
+          </template>
+        </div>
+        <div class="card-footer d-flex flex-wrap gap-2">
+          <a class="btn btn-outline-primary btn-sm" :href="betHref"><i class="ti ti-notes me-1" aria-hidden="true"></i>Log this bet</a>
+          <button type="button" class="btn btn-outline-secondary btn-sm" @click="copyLink()"><i class="ti ti-link me-1" aria-hidden="true"></i>Copy link</button>
+          <span class="ms-auto small text-secondary align-self-center" x-text="v.modelText"></span>
+        </div>
+      </div>
+
+      {#- caveats #}
+      <template x-for="c in v.caveats" :key="c.code">
+        <div class="alert py-2 mb-2 small" :class="c.kind === 'warning' ? 'alert-warning' : 'alert-info'" role="status">
+          <i class="ti me-1" :class="c.kind === 'warning' ? 'ti-alert-triangle' : 'ti-info-circle'" aria-hidden="true"></i><span x-text="c.text"></span>
+        </div>
+      </template>
+
+      {#- tiles #}
+      <div class="row row-cards g-2 mb-3 game-tiles">
+        <div class="col-6 col-lg">{{ stat_tile("Projected score", "v.tiles.score.value", "v.tiles.score.sub") }}</div>
+        <div class="col-6 col-lg">{{ stat_tile("Spread", "v.tiles.spread.value", "v.tiles.spread.sub") }}</div>
+        <div class="col-6 col-lg">{{ stat_tile("Total", "v.tiles.total.value", "v.tiles.total.sub") }}</div>
+        <div class="col-6 col-lg">{{ stat_tile("Fair ML", "v.tiles.fair.value", "v.tiles.fair.sub", "fair_line") }}</div>
+        <div class="col-12 col-lg">
+          <div class="card card-sm stat-tile">
+            <div class="card-body">
+              <div class="subheader">Kelly stake{{ glossary_tip("kelly") }}</div>
+              <div class="h2 mb-0 num" x-text="v.tiles.kelly.value"></div>
+              <div class="text-secondary small" x-text="v.tiles.kelly.sub"></div>
+              <div class="text-secondary small" x-show="!v.tiles.kelly.none">Share of bankroll, capped. Not betting advice.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {#- 1. why this number #}
+      <div class="card mb-3">
+        <div class="card-header">
+          <button type="button" class="section-toggle" @click="toggle('why')" :aria-expanded="open.why" aria-controls="sec-why">
+            <h3 class="card-title mb-0">Why this number</h3>
+            <span class="ms-2 small text-secondary d-none d-sm-inline" x-text="v.ladder.method"></span>
+            <i class="ti ti-chevron-down ms-auto" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div id="sec-why" x-show="open.why">
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-12 col-lg-6">
+                <div x-data="gameChart('ladder')"><div class="chart-box chart-sm" x-ref="chart"
+                     role="img" :aria-label="'Ensemble ladder from ' + v.ladder.base + ' to ' + v.ladder.final"></div></div>
+              </div>
+              <div class="col-12 col-lg-6">
+                <div class="table-responsive">
+                  <table class="table table-sm table-vcenter mb-1">
+                    <thead><tr><th>Component</th><th class="text-end">Its own win%</th><th class="text-end">Weight</th>
+                      <th class="text-end">Contribution</th><th class="text-end">Share</th></tr></thead>
+                    <tbody>
+                      <tr class="text-secondary"><td>Neutral game (base)</td><td class="text-end num" x-text="v.ladder.base"></td><td></td><td></td><td></td></tr>
+                      <template x-for="row in v.ladder.rows" :key="row.key">
+                        <tr>
+                          <td x-text="row.label"></td>
+                          <td class="text-end num" x-text="row.prob"></td>
+                          <td class="text-end num" x-text="row.coef"></td>
+                          <td class="text-end num" :class="row.up ? 'ladder-up' : 'ladder-down'">
+                            <i class="ti" :class="row.up ? 'ti-arrow-up-right' : 'ti-arrow-down-right'" aria-hidden="true"></i>
+                            <span x-text="row.step"></span></td>
+                          <td class="text-end num" x-text="row.share"></td>
+                        </tr>
+                      </template>
+                      <tr class="fw-bold"><td>Final (home win)</td><td class="text-end num" x-text="v.ladder.final"></td><td></td><td></td><td></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="small text-secondary">Contributions are probability steps toward the home side, applied in the
+                  order Elo → Monte Carlo → XGBoost from a neutral game.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {#- 2. margin and total #}
+      <div class="card mb-3">
+        <div class="card-header">
+          <button type="button" class="section-toggle" @click="toggle('dist')" :aria-expanded="open.dist" aria-controls="sec-dist">
+            <h3 class="card-title mb-0">Margin and total</h3>
+            <span class="ms-2 small text-secondary d-none d-sm-inline">50,000 Monte Carlo games</span>
+            <i class="ti ti-chevron-down ms-auto" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div id="sec-dist" x-show="open.dist">
+          <div class="card-body">
+            <ul class="nav nav-tabs mb-2" role="tablist">
+              <template x-for="t in [['margin', 'Margin'], ['total', 'Total'], ['scores', 'Scores']]" :key="t[0]">
+                <li class="nav-item" role="presentation">
+                  <button type="button" class="nav-link" role="tab" :class="distTab === t[0] ? 'active' : ''"
+                          :aria-selected="distTab === t[0]" @click="distTab = t[0]" x-text="t[1]"></button>
+                </li>
+              </template>
+            </ul>
+            <div x-data="gameChart('dist')"><div class="chart-box" x-ref="chart" role="img"
+                 :aria-label="'Distribution of the ' + distTab"></div></div>
+            <div class="d-flex flex-wrap gap-3 small text-secondary mt-1" x-show="distTab !== 'scores'">
+              <span x-show="distTab === 'margin'"><span class="legend-line legend-even"></span>Even</span>
+              <span><span class="legend-line legend-model"></span>Model <span class="num" x-text="distTab === 'margin' ? $fmt.signed(result.margin.mean, 1) : $fmt.num(result.total.median, 1)"></span></span>
+              <span x-show="distTab === 'margin' ? result.market?.spread != null : result.market?.total != null">
+                <span class="legend-line legend-market"></span>Market <span class="num"
+                  x-text="distTab === 'margin' ? $fmt.signed(-(result.market?.spread ?? 0), 1) : $fmt.num(result.market?.total, 1)"></span></span>
+              <span><span class="legend-band"></span>80% range</span>
+            </div>
+            <div class="small mt-2 num" x-text="v.distText[distTab]"></div>
+          </div>
+        </div>
+      </div>
+
+      {#- 3. team comparison #}
+      <div class="card mb-3">
+        <div class="card-header">
+          <button type="button" class="section-toggle" @click="toggle('compare')" :aria-expanded="open.compare" aria-controls="sec-compare">
+            <h3 class="card-title mb-0">Team comparison</h3>
+            <i class="ti ti-chevron-down ms-auto" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div id="sec-compare" x-show="open.compare">
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-12 col-lg-7">
+                <div class="table-responsive">
+                  <table class="table table-sm compare-table mb-0">
+                    <thead><tr>
+                      <th class="text-start"><span class="d-inline-flex align-items-center gap-1">{{ team_badge("v.away", "badge-sm") }}<span x-text="v.away.abbr"></span></span></th>
+                      <th class="metric">Last 10 unless noted</th>
+                      <th class="text-end"><span class="d-inline-flex align-items-center gap-1"><span x-text="v.home.abbr"></span>{{ team_badge("v.home", "badge-sm") }}</span></th>
+                    </tr></thead>
+                    <tbody>
+                      <template x-for="row in v.compare" :key="row.label">
+                        <tr :class="row.v6 ? 'v6' : ''" :title="row.v6 ? 'Available with model v6 (Model → Build ratings)' : ''">
+                          <td class="text-start num" :class="row.better === 'away' ? 'fw-bold' : ''">
+                            <span x-text="row.away"></span>
+                            <span class="badge bg-secondary-lt rank-chip ms-1" x-show="row.awayRank" x-text="'#' + row.awayRank" :title="rankTip(row.awayRank)"></span>
+                          </td>
+                          <td class="metric" x-text="row.label"></td>
+                          <td class="text-end num" :class="row.better === 'home' ? 'fw-bold' : ''">
+                            <span class="badge bg-secondary-lt rank-chip me-1" x-show="row.homeRank" x-text="'#' + row.homeRank" :title="rankTip(row.homeRank)"></span>
+                            <span x-text="row.home"></span>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="small text-secondary mt-1">Bold marks the better value. Form is before injuries; the model uses injury-adjusted values.</div>
+              </div>
+              <div class="col-12 col-lg-5">
+                <div x-data="gameChart('radar')"><div class="chart-box" x-ref="chart" role="img" aria-label="Radar of shooting, ball security, rebounding and net rating"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {#- 4. availability #}
+      <div class="card mb-3">
+        <div class="card-header">
+          <button type="button" class="section-toggle" @click="toggle('avail')" :aria-expanded="open.avail" aria-controls="sec-avail">
+            <h3 class="card-title mb-0">Availability</h3>{{ glossary_tip("healthy_current") }}
+            <i class="ti ti-chevron-down ms-auto" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div id="sec-avail" x-show="open.avail">
+          <div class="card-body">
+            <div class="row g-4">
+              <template x-for="a in [v.availability.away, v.availability.home]" :key="a.team.id">
+                <div class="col-12 col-lg-6">
+                  <div class="d-flex align-items-center gap-2 mb-2">
+                    {{ team_badge("a.team", "badge-sm") }}
+                    <strong x-text="a.team.name"></strong>
+                  </div>
+                  <div class="d-flex flex-wrap gap-3 small mb-2">
+                    <span>Healthy <strong class="num" x-text="a.healthy"></strong></span>
+                    <span>Current <strong class="num" :class="a.hurt ? 'text-loss' : ''" x-text="a.current"></strong></span>
+                    <span x-show="a.deficit" class="text-loss num"><i class="ti ti-trending-down" aria-hidden="true"></i> <span x-text="a.deficit"></span></span>
+                  </div>
+                  <template x-if="a.players.length">
+                    <div class="table-responsive">
+                      <table class="table table-sm table-vcenter mb-1">
+                        <thead><tr><th>Player</th><th>Status</th><th>Comment</th><th class="text-end">Impact</th>
+                          <th class="text-end" x-show="a.v6">Play %</th><th class="text-end" x-show="a.v6">Margin</th></tr></thead>
+                        <tbody>
+                          <template x-for="p in a.players" :key="p.name">
+                            <tr>
+                              <td><span x-text="p.name"></span>
+                                <i class="ti ti-help-circle text-secondary ms-1" x-show="!p.matched"
+                                   title="No impact rating found: a default of 0.05 is used" aria-label="Unmatched player"></i></td>
+                              <td><span class="badge" :class="p.cls" x-text="p.label"></span></td>
+                              <td class="small text-secondary" x-text="p.detail || '–'"></td>
+                              <td class="text-end num" x-text="p.impactText"></td>
+                              <td class="text-end num" x-show="a.v6" x-text="p.playText"></td>
+                              <td class="text-end num" x-show="a.v6" x-text="p.marginText"></td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+                  <div class="text-secondary small" x-show="!a.players.length" x-text="a.empty"></div>
+                  <div class="small text-secondary mt-1" x-show="a.reliability">
+                    <i class="ti ti-shield-search me-1" aria-hidden="true"></i><span x-text="a.reliability"></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {#- 5. model internals #}
+      <div class="card mb-3">
+        <div class="card-header">
+          <button type="button" class="section-toggle" @click="toggle('internals')" :aria-expanded="open.internals" aria-controls="sec-internals">
+            <h3 class="card-title mb-0">Model internals</h3>
+            <span class="ms-2 small text-secondary d-none d-sm-inline">SHAP, feature row, Poisson</span>
+            <i class="ti ti-chevron-down ms-auto" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div id="sec-internals" x-show="open.internals">
+          <div class="card-body">
+            <div class="row g-4">
+              <div class="col-12 col-lg-7">
+                <h4>SHAP: what moved XGBoost</h4>
+                <template x-if="result.shap">
+                  <div>
+                    <div x-data="gameChart('shap')"><div class="chart-box chart-tall" x-ref="chart" role="img" aria-label="SHAP values per feature"></div></div>
+                    <div class="small text-secondary" x-text="v.shapNote"></div>
+                  </div>
+                </template>
+                <div class="text-secondary small" x-show="!result.shap"
+                     x-text="result.mode === 'elo_only' ? 'No trained model, so there is nothing to explain yet.' : 'Install shap (pip install shap) for the explanation chart.'"></div>
+              </div>
+              <div class="col-12 col-lg-5">
+                <h4>Feature row <span class="small text-secondary fw-normal">(injury-adjusted, home − away)</span></h4>
+                <div class="table-responsive">
+                  <table class="table table-sm mb-0">
+                    <tbody>
+                      <template x-for="f in v.features" :key="f.name">
+                        <tr><td class="font-monospace small" x-text="f.name"></td><td class="text-end num" x-text="f.value"></td></tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="col-12" x-show="result.poisson">
+                <h4>Poisson quarters <span class="badge bg-secondary-lt ms-1">legacy engine</span></h4>
+                <div x-data="gameChart('poisson')"><div class="chart-box chart-sm" x-ref="chart" role="img" aria-label="One sampled game by quarter"></div></div>
+                <div class="small text-secondary num" x-text="v.poisson?.line"></div>
+                <div class="small text-secondary">Bars are one random draw; the λ means are the projection.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  {#- ── custom injuries editor ───────────────────────────────────────── #}
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="injuries-offcanvas" aria-labelledby="injuries-offcanvas-title">
+    <div class="offcanvas-header">
+      <h2 class="offcanvas-title" id="injuries-offcanvas-title">Custom injuries</h2>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+      <p class="small text-secondary">Seeded from the live report. Change a status, remove players who will play, or add someone.</p>
+      <div x-show="customBusy" class="text-secondary small mb-2"><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Loading the injury report…</div>
+      <template x-for="side in ['away', 'home']" :key="side">
+        <div class="mb-4">
+          <h3 class="h4" x-text="(side === 'home' ? homeTeam : awayTeam)?.name || (side === 'home' ? 'Home' : 'Away')"></h3>
+          <template x-for="(p, i) in custom[side]" :key="side + p.name">
+            <div class="d-flex gap-2 align-items-center mb-2">
+              <span class="flex-fill text-truncate" x-text="p.name"></span>
+              <select class="form-select form-select-sm w-auto" x-model="p.status" :aria-label="'Status of ' + p.name">
+                <template x-for="s in statuses" :key="s"><option :value="s" :selected="s === p.status" x-text="statusLabel[s]"></option></template>
+              </select>
+              <button type="button" class="btn btn-sm btn-icon btn-ghost-danger" @click="removePlayer(side, i)" :aria-label="'Remove ' + p.name">
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            </div>
+          </template>
+          <div class="text-secondary small mb-2" x-show="!custom[side].length">Nobody listed.</div>
+          <div class="input-group input-group-sm">
+            <input type="text" class="form-control" placeholder="Player name" x-model="newPlayer[side].name"
+                   @keydown.enter.prevent="addPlayer(side)" :aria-label="'Add a ' + side + ' player'">
+            <select class="form-select" style="max-width: 9rem" x-model="newPlayer[side].status" aria-label="Status">
+              <template x-for="s in statuses" :key="s"><option :value="s" x-text="statusLabel[s]"></option></template>
+            </select>
+            <button type="button" class="btn" @click="addPlayer(side)">Add</button>
+          </div>
+        </div>
+      </template>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-secondary" @click="seedCustom()">Reset to live report</button>
+        <button type="button" class="btn btn-primary ms-auto" data-bs-dismiss="offcanvas" @click="analyze()">Apply and analyze</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

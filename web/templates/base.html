@@ -80,14 +80,20 @@
                   <div class="list-group-item">
                     <div class="d-flex justify-content-between small mb-1">
                       <strong x-text="$store.jobs.label(job)"></strong>
-                      <span class="text-secondary num" x-text="job.progress != null ? $fmt.pct(job.progress) : ''"></span>
+                      <span class="text-secondary num" x-text="job.progress != null ? $fmt.pct(job.progress) : (job.total && job.done ? job.done + '/' + job.total : '')"></span>
                     </div>
                     <div class="progress progress-sm">
                       <div class="progress-bar" role="progressbar" :aria-label="$store.jobs.label(job) + ' progress'"
                            :class="job.progress == null ? 'progress-bar-indeterminate' : ''"
                            :style="job.progress != null ? {width: (job.progress * 100) + '%'} : {}"></div>
                     </div>
-                    <div class="small text-secondary mt-1 text-truncate" x-text="job.stage || ''"></div>
+                    <div class="d-flex align-items-center gap-2 small text-secondary mt-1">
+                      <span class="text-truncate flex-fill" x-text="$store.jobs.stageText(job)"></span>
+                      <span class="num text-nowrap" x-text="$store.jobs.elapsed(job)"></span>
+                      <button type="button" class="btn btn-sm btn-ghost-danger px-1 py-0" :disabled="job.cancelling"
+                              :aria-label="'Cancel ' + $store.jobs.label(job)" title="Cancel"
+                              @click="$store.jobs.cancel(job.id)"><i class="ti ti-x" aria-hidden="true"></i></button>
+                    </div>
                   </div>
                 </template>
                 <div class="list-group-item small text-secondary" x-show="!$store.jobs.count">No running jobs.</div>
