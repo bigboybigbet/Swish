@@ -71,35 +71,38 @@ NBA_HISTORY_DIR=../nba-data-2010-2024 python -m research.benchmark --variants v5
 - Git
 - A normal home or office internet connection. NBA.com's stats API often blocks cloud servers and some VPNs; if downloads time out, switch the VPN off.
 
-### 2. Install
+### 2. Get the code (once)
 
 ```bash
 git clone https://github.com/bigboybigbet/Swish.git
 cd Swish
-python -m venv .venv
 ```
 
-Activate the virtual environment:
+### 3. Start the app (every time)
 
-| System | Command |
+| System | How |
 |---|---|
-| macOS / Linux | `source .venv/bin/activate` |
-| Windows PowerShell | `.venv\Scripts\Activate.ps1` (if blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`) |
-| Windows cmd | `.venv\Scripts\activate.bat` |
+| Windows | Double-click `start.bat` (or run `start.bat` in a terminal) |
+| macOS / Linux | `./start.sh` |
+| Any | `python start.py` |
 
-Then install the dependencies:
+The first run creates a virtual environment in `.venv` and installs the dependencies (a few minutes, once). After that it starts straight away: dependencies are only installed again when `requirements.txt` changes, for example after a `git pull` that adds a library. Options pass through, e.g. `start.bat --port 8010` or `./start.sh --no-browser`.
+
+Wait for `Ready: open http://127.0.0.1:8000` in the terminal; the browser opens by itself. Keep the terminal open while you use the app and stop it with `Ctrl+C`.
+
+To update later: `git pull`, then start as usual.
+
+<details>
+<summary>Manual setup instead of the launcher</summary>
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+.venv\Scripts\activate            # Windows (PowerShell: .venv\Scripts\Activate.ps1)
+source .venv/bin/activate          # macOS / Linux
+pip install -r requirements.txt    # once, and again only when requirements.txt changes
+python -m server                   # every time (after activating .venv)
 ```
-
-### 3. Start the app
-
-```bash
-python -m server
-```
-
-The browser opens http://127.0.0.1:8000. Options: `--port 8010` if 8000 is taken, `--no-browser` to skip opening a tab. Stop it with `Ctrl+C`.
+</details>
 
 ### 4. Build the model (first run, then about once a week)
 
@@ -140,14 +143,14 @@ Replay any date from 2010-11 to 2023-24 with real historical games, no network n
 
 ```bash
 git clone --depth 1 https://github.com/NocturneBear/NBA-Data-2010-2024 ../nba-data-2010-2024
-NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 python -m server
+NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 ./start.sh
 ```
 
-On Windows PowerShell set the variables first: `$env:NBA_HISTORY_DIR="..\nba-data-2010-2024"; $env:NBA_QUANT_DEMO_DATE="2024-03-15"`.
+On Windows PowerShell: `$env:NBA_HISTORY_DIR="..\nba-data-2010-2024"; $env:NBA_QUANT_DEMO_DATE="2024-03-15"; .\start.bat`.
 
 ### The previous interface
 
-The Streamlit app still works and uses the same model: `streamlit run nba_app.py`. The Bets page of the web app is still being built, so use Streamlit for the ROI log until then.
+The Streamlit app still works and uses the same model: `.venv\Scripts\streamlit run nba_app.py` on Windows, `.venv/bin/streamlit run nba_app.py` on macOS / Linux. The Bets page of the web app is still being built, so use Streamlit for the ROI log until then.
 
 ### Troubleshooting
 
@@ -155,10 +158,10 @@ The Streamlit app still works and uses the same model: `streamlit run nba_app.py
 |---|---|
 | Browser says "can't reach this page" or shows a blank page | Wait for the terminal to print `Ready: open http://127.0.0.1:8000`, then reload. The first start can take up to a minute. Keep the terminal window open while you use the app. |
 | Train fails with a timeout on stats.nba.com | Turn off VPN / proxy and retry; NBA.com rate-limits, so wait a minute between attempts. |
-| `Address already in use` | `python -m server --port 8010` |
+| `Address already in use` | `start.bat --port 8010` (or `./start.sh --port 8010`) |
 | Predictions say "Elo only" | Run **Train** once (step 4). |
 | Injuries show "unavailable" | ESPN's feed was unreachable; the prediction is made without injuries and says so. |
-| `ModuleNotFoundError` | The virtual environment is not active; activate it (step 2) and reinstall. |
+| `ModuleNotFoundError` | Start with `start.bat` / `./start.sh`, which use `.venv` and install what is missing. With the manual setup, activate `.venv` first. |
 
 ## Project layout
 

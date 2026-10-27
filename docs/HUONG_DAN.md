@@ -20,50 +20,52 @@ Kết quả kiểm tra trên 8.874 trận thật từ mùa 2017-18 đến 2023-2
 | Elo cũ | 0.634 | 64,0% |
 | v5 XGBoost (trước đây) | 0.652 | 62,6% |
 
-## Cài đặt (làm một lần)
+## Cài đặt và chạy app
 
 **Bạn cần có:**
 - Python 3.11 trở lên. Kiểm tra bằng lệnh `python --version`.
 - Git.
 - Mạng Internet bình thường. NBA.com hay chặn VPN và máy chủ cloud, nên nếu tải dữ liệu bị timeout thì hãy tắt VPN.
 
-**Các bước:**
+**Tải code về (chỉ làm một lần):**
 
 ```bash
 git clone https://github.com/bigboybigbet/Swish.git
 cd Swish
-python -m venv .venv
 ```
 
-Kích hoạt môi trường ảo:
+**Chạy app (mỗi lần dùng):**
 
-| Hệ điều hành | Lệnh |
+| Hệ điều hành | Cách chạy |
 |---|---|
-| Windows PowerShell | `.venv\Scripts\Activate.ps1` |
-| Windows cmd | `.venv\Scripts\activate.bat` |
-| macOS / Linux | `source .venv/bin/activate` |
+| Windows | Bấm đúp vào file `start.bat` |
+| macOS / Linux | Chạy `./start.sh` |
 
-Nếu PowerShell báo lỗi không cho chạy script, chạy lệnh này một lần rồi kích hoạt lại:
+**Bạn không phải cài lại thư viện mỗi lần chạy.**
+- Lần chạy đầu tiên, launcher tạo môi trường ảo `.venv` và cài thư viện. Bước này mất vài phút và chỉ xảy ra một lần.
+- Từ lần thứ hai trở đi, app khởi động ngay. Launcher so `requirements.txt` với lần cài trước và chỉ cài lại khi file này thay đổi, ví dụ sau khi `git pull` về bản có thêm thư viện.
 
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
+Đợi terminal in dòng `Ready: open http://127.0.0.1:8000`, trình duyệt sẽ tự mở. Giữ cửa sổ terminal mở trong suốt lúc dùng app. Bấm `Ctrl+C` để tắt.
 
-Cài thư viện:
+**Cập nhật bản mới:** chạy `git pull` rồi khởi động như bình thường.
+
+**Tuỳ chọn khi chạy:**
+- `start.bat --port 8010`: chạy ở cổng 8010 nếu cổng 8000 đang bận.
+- `./start.sh --no-browser`: không tự mở trình duyệt.
+
+<details>
+<summary>Cài thủ công (không dùng launcher)</summary>
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+.venv\Scripts\activate            # Windows (PowerShell: .venv\Scripts\Activate.ps1)
+source .venv/bin/activate          # macOS / Linux
+pip install -r requirements.txt    # chỉ một lần, và khi requirements.txt thay đổi
+python -m server                   # mỗi lần chạy, sau khi đã kích hoạt .venv
 ```
 
-## Chạy app
-
-```bash
-python -m server
-```
-
-Trình duyệt sẽ tự mở http://127.0.0.1:8000. Bấm `Ctrl+C` trong cửa sổ terminal để tắt app.
-
-Mỗi lần mở app sau này, bạn chỉ cần vào thư mục dự án, kích hoạt môi trường ảo, rồi chạy `python -m server`.
+Nếu PowerShell báo không cho chạy script, chạy lệnh này một lần: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+</details>
 
 ## Lần đầu: dựng model
 
@@ -118,13 +120,13 @@ git clone --depth 1 https://github.com/NocturneBear/NBA-Data-2010-2024 ../nba-da
 Trên Windows PowerShell:
 
 ```powershell
-$env:NBA_HISTORY_DIR="..\nba-data-2010-2024"; $env:NBA_QUANT_DEMO_DATE="2024-03-15"; python -m server
+$env:NBA_HISTORY_DIR="..\nba-data-2010-2024"; $env:NBA_QUANT_DEMO_DATE="2024-03-15"; .\start.bat
 ```
 
 Trên macOS / Linux:
 
 ```bash
-NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 python -m server
+NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 ./start.sh
 ```
 
 ## Giao diện cũ (Streamlit)
@@ -132,7 +134,8 @@ NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 python -m s
 Trang Bets (ROI) của web app chưa làm xong. Trong lúc chờ, bạn vẫn dùng được app cũ, chạy cùng model mới:
 
 ```bash
-streamlit run nba_app.py
+.venv\Scripts\streamlit run nba_app.py     # Windows
+.venv/bin/streamlit run nba_app.py         # macOS / Linux
 ```
 
 ## Gặp lỗi thì làm gì
@@ -141,10 +144,10 @@ streamlit run nba_app.py
 |---|---|
 | Trình duyệt báo "can't reach this page" hoặc trang trắng | Đợi terminal in dòng `Ready: open http://127.0.0.1:8000` rồi tải lại trang. Lần chạy đầu có thể mất tới 1 phút. Giữ cửa sổ terminal mở trong suốt lúc dùng app. |
 | Train báo timeout khi kết nối stats.nba.com | Tắt VPN hoặc proxy rồi thử lại. NBA.com giới hạn số lượt gọi, nên hãy đợi khoảng 1 phút giữa các lần thử. |
-| `Address already in use` | Cổng 8000 đang bận. Chạy `python -m server --port 8010` rồi mở http://127.0.0.1:8010 |
+| `Address already in use` | Cổng 8000 đang bận. Chạy `start.bat --port 8010` rồi mở http://127.0.0.1:8010 |
 | Dự đoán hiện "Elo only" | Chưa Train. Làm theo mục "Lần đầu: dựng model". |
 | Chấn thương hiện "unavailable" | Không lấy được dữ liệu từ ESPN. App vẫn dự đoán nhưng không tính chấn thương, và có ghi chú điều này. |
-| `ModuleNotFoundError` | Môi trường ảo chưa được kích hoạt. Kích hoạt lại rồi chạy lại `pip install -r requirements.txt`. |
+| `ModuleNotFoundError` | Hãy chạy bằng `start.bat` hoặc `./start.sh`: launcher dùng `.venv` và tự cài phần còn thiếu. Nếu cài thủ công, nhớ kích hoạt `.venv` trước. |
 
 ## Lưu ý
 
