@@ -7,9 +7,12 @@ elo_ratings.json
 nba_blend_calibrator.json
 autobacktest_log.json
 optuna_best_params.json
+team_strength.json
 *.db
 
 # Python
+.venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo

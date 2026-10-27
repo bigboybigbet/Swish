@@ -179,6 +179,12 @@ def build_state(raw: pd.DataFrame, fit_seasons=None) -> dict:
                            "history": st["history"].get(t, [])}
                   for t in st["R"]},
         "last_game_date": str(games["GAME_DATE"].max().date()),
+        # every replayed game with its PRE-game expected margin, for the
+        # Accuracy page: [date, home_id, away_id, exp_margin, home_won, margin]
+        "games": [[str(d.date()), int(h), int(a), round(float(e), 2), int(r), int(m)]
+                  for d, h, a, e, r, m in zip(games["GAME_DATE"], games["TEAM_ID_H"],
+                                              games["TEAM_ID_A"], pre["EXP_MARGIN"],
+                                              games["RESULT"], games["MARGIN"])],
         "n_games": len(games),
         "built_at": datetime.now().isoformat(timespec="seconds"),
     }
