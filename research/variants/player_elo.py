@@ -120,3 +120,87 @@ def fit_predict(train: pd.DataFrame, test: pd.DataFrame) -> np.ndarray:
     model = LogisticRegression(C=1e6, max_iter=1000)
     model.fit(train[FEATURES].values, train["RESULT"].values)
     return model.predict_proba(test[FEATURES].values)[:, 1]
+
+
+# ── signal file for the ensemble stage ───────────────────────────────────────
+
+SIGNAL_COLS = {
+    "PE_DIFF": "diff",            # expected home margin, home advantage included
+    "PE_HFA": "home",             # home advantage inside diff
+    "PE_SD": "sd",                # predictive sd of the margin
+    "PE_H": "home_strength",      # home side, points vs an average team
+    "PE_A": "away_strength",
+    "PE_FULL_DIFF": "full_diff",  # same with every recent regular available
+    "PE_ABSENCE": "absence",      # diff - full_diff: net effect of absences
+    "PE_IMP": "impact_diff",      # plus-minus / Elo part of diff
+    "PE_BOX": "box_diff",         # box-score part of diff
+}
+
+
+def write_signals(path: str = SIGNAL_FILE, first_season: str = "2011-12") -> pd.DataFrame:
+    """Regenerate research/cache/signals/player_elo.csv: one row per game
+    from 2011-12 on with pre-game values only (no result columns)."""
+    raw = load_history()
+    df = build_dataset(raw)
+    df["PE_ABSENCE"] = df["PE_DIFF"] - df["PE_FULL_DIFF"]
+    df = df[df["SEASON"] >= first_season]
+    out = df[["GAME_ID", "SEASON"]].copy()
+    for c, k in SIGNAL_COLS.items():
+        out[f"{NAME}_{k}"] = df[c].round(4).values
+    out["GAME_ID"] = out["GAME_ID"].astype(str).str.zfill(10)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    out.to_csv(path, index=False)
+    return out
+
+
+# ── inspection and live use ──────────────────────────────────────────────────
+
+def build_engine(raw: pd.DataFrame = None, until=None, **params):
+    """Engine state after every game before `until` (a date; None = all)."""
+    prep = prepared(raw)
+    if until is not None:
+        keep = prep["games"]["GAME_DATE"] < pd.Timestamp(until)
+        n = int(keep.sum())
+        cut = prep["ptr"][2 * n]
+        prep = {**prep, "games": prep["games"].iloc[:n], "ptr": prep["ptr"][:2 * n + 1],
+                **{k: prep[k][:n] for k in ("day", "season", "home", "away", "margin")},
+                **{k: prep[k][:cut] for k in ("pid", "name", "min", "pm", "box")}}
+    _, eng = replay(prep, **params)
+    return eng
+
+
+def leaderboard(date=None, n: int = 10, min_games: int = 40) -> pd.DataFrame:
+    """Top players by rating as of `date` (None = end of the data), among
+    players who played in the 90 days before it."""
+    eng = build_engine(until=date)
+    last = int(eng.last_day[:len(eng.ids)].max())
+    return pd.DataFrame(eng.leaderboard(n, min_games, active_since=last - 90))
+
+
+# Probability that a player listed on the ESPN injury report plays
+STATUS_PLAY_PROB = {"out": 0.0, "doubtful": 0.15, "questionable": 0.5,
+                    "day-to-day": 0.75, "probable": 0.9}
+
+
+def live_prediction(eng, home, away, home_roster, away_roster,
+                    injuries: dict = None, game_date=None) -> dict:
+    """Pre-game prediction for an upcoming game from a live engine.
+
+    home_roster / away_roster: player ids on each roster (e.g. eng.roster()
+    or nba_api commonteamroster); injuries: {player_id: ESPN status}.
+    Players ruled out drop out, the rest are weighted by their chance to
+    play; the team strengths are re-normalised to 240 minutes."""
+    injuries = injuries or {}
+
+    def avail(roster):
+        ids = [p for p in roster if STATUS_PLAY_PROB.get(
+            str(injuries.get(p, "")).lower(), 1.0) > 0]
+        prob = [STATUS_PLAY_PROB.get(str(injuries.get(p, "")).lower(), 1.0) for p in ids]
+        return ids, prob
+
+    hp, hq = avail(home_roster)
+    ap, aq = avail(away_roster)
+    out = eng.predict(home, away, hp, ap, hq, aq)
+    full = eng.predict(home, away, list(home_roster), list(away_roster))
+    out["absence"] = out["margin"] - full["margin"]
+    return out

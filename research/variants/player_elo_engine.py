@@ -142,36 +142,40 @@ class PlayerElo:
         """Full player rating R = r + box (points / 48)."""
         return self.r[j] + self.box(j)
 
-    def weights(self, j, minutes=None) -> np.ndarray:
+    def weights(self, j, minutes=None, play_prob=None) -> np.ndarray:
         """Minute shares summing to 5 (five on court).  Without explicit
-        minutes, each player's recent average is used, raised to min_pow."""
+        minutes, each player's recent average is used, raised to min_pow;
+        play_prob (0..1 per player, from an injury report) scales it."""
         m = self.em[j] ** self.p["min_pow"] if minutes is None \
             else np.asarray(minutes, float)
+        if play_prob is not None:
+            m = m * np.asarray(play_prob, float)
         s = m.sum()
         return 5 * m / s if s > 0 else np.full(len(j), 5 / max(len(j), 1))
 
     # ── pre-game ─────────────────────────────────────────────────────────────
-    def side(self, j, team=None, minutes=None) -> dict:
+    def side(self, j, team=None, minutes=None, play_prob=None) -> dict:
         """Strength of one side from internal rows j (see team_strength)."""
-        w = self.weights(j, minutes)
+        w = self.weights(j, minutes, play_prob)
         imp, box = float(w @ self.r[j]), float(w @ self.box(j))
         t = self.tr.get(team, 0.0)
         var = float(w ** 2 @ self.P[j] + self.tP.get(team, 0.0))
         return {"strength": imp + box + t, "impact": imp, "box": box,
                 "team": t, "var": var}
 
-    def team_strength(self, team, players, minutes=None) -> dict:
-        """Strength (points vs an average team) of `team` with the given
-        available players.  Expected minutes default to each player's recent
-        average rescaled to 240; this is how injuries and rest enter —
-        pass only the players expected to play."""
-        return self.side(self.rows(players), team, minutes)
+    def team_strength(self, team, players, minutes=None, play_prob=None) -> dict:
+        """Strength (points vs an average team) of `team` with an arbitrary
+        set of available players.  Expected minutes default to each player's
+        recent average rescaled to 240 minutes; this is how injuries and rest
+        enter: leave out players ruled out, give doubtful / questionable
+        players a play_prob below 1."""
+        return self.side(self.rows(players), team, minutes, play_prob)
 
     def predict(self, home, away, home_players, away_players,
-                home_minutes=None, away_minutes=None) -> dict:
+                home_prob=None, away_prob=None) -> dict:
         """Expected home margin and its predictive sd before tip-off."""
-        h = self.team_strength(home, home_players, home_minutes)
-        a = self.team_strength(away, away_players, away_minutes)
+        h = self.team_strength(home, home_players, play_prob=home_prob)
+        a = self.team_strength(away, away_players, play_prob=away_prob)
         sd = np.sqrt(self.p["sigma"] ** 2 + h["var"] + a["var"])
         return {"margin": self.hfa + h["strength"] - a["strength"],
                 "sd": float(sd), "hfa": self.hfa, "home": h, "away": a}
