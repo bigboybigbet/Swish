@@ -196,6 +196,7 @@
               · <span x-text="v.status"></span></span>
             <span class="d-flex gap-1 flex-wrap">
               <span class="badge bg-azure-lt" x-show="result.mode === 'elo_only'">Elo only</span>
+              <span class="badge bg-green-lt" x-show="result.mode === 'team_strength'">Kalman-Elo v6</span>
               <span class="badge bg-azure-lt" x-show="result.mode === 'blend_v5'">Blend v5</span>
               <span class="badge bg-azure-lt" x-show="result.mode === 'stacked_v6'">Stacked v6</span>
             </span>
