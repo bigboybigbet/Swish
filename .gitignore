@@ -20,3 +20,6 @@ optuna_best_params.json
 vama_pdfs/
 *.xlsx
 *.db
+
+# Arena tournament scratch
+.arena/

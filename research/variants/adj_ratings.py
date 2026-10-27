@@ -2,20 +2,25 @@
 Opponent-adjusted team ratings (decayed ridge / Massey style) -> P(home win).
 
 Walking through history one game-day at a time, every team gets ratings
-from a ridge regression on all EARLIER games only (same-day games never see
-each other), with exponentially time-decayed weights:
+from ridge regressions on all EARLIER games only (same-day games never see
+each other), with exponentially time-decayed game weights:
 
-  margin model   MARGIN = home + r_home - r_away              (capped margin)
+  margin model   MARGIN = home + r_home - r_away              (margin capped)
   per-100 model  100*PTS/POSS = mu +/- home/2 + O_team - D_opp (two rows/game)
   pace model     POSS = mu + p_home + p_away
 
 Ratings are shrunk toward a prior: at each new season the prior becomes the
-previous season's final rating times SHRINK (and old data is kept at weight
-CARRY).  The normal equations are updated incrementally, so a refit is one
+previous season's final rating times SHRINK, and old data is kept at weight
+CARRY.  The normal equations are updated incrementally, so a refit is one
 small linear solve per game-day.
 
-fit_predict fits a logistic regression of RESULT on the adjusted rating gap
-(+ Elo and rest features) on the train frame and applies it to the test frame.
+The home edge comes from a second, long-memory pass of the margin model
+(HOME_HALFLIFE days, no season reset), so it adapts to league-wide drift.
+
+fit_predict: logistic regression of RESULT on ADJ_PRED = r_home - r_away +
+home edge, plus back-to-back flags, fitted on the train frame.
+The per-100 / pace ratings are exported for spreads and totals but are not
+used by the classifier (no gain on the dev window).
 """
 import hashlib
 import json
@@ -25,28 +30,27 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 
-from research.benchmark import CACHE_DIR, baseline_dataset
+from research.benchmark import CACHE_DIR
 
-# Rating-system hyperparameters (tuned on the dev window 2014-15..2016-17)
+# Tuned on the dev window (2014-15..2016-17); the dev optimum is a flat plateau
+# (halflife 60-90, lam 8-12, shrink 0.6-0.8, carry 0.2-0.35, cap >= 30).
 PARAMS = {
-    "halflife": 60.0,   # days; in-season time decay of game weights
-    "lam":      4.0,    # ridge strength toward the prior (in "games")
-    "carry":    0.0,    # weight kept on last season's data at a new season
-    "shrink":   0.6,    # prior = SHRINK * last season's final rating
-    "cap":      25.0,   # margins clipped to +/- CAP points
+    "halflife": 75.0,   # days; in-season decay of game weights
+    "lam":      10.0,   # ridge strength toward the prior (in game-equivalents)
+    "carry":    0.3,    # weight kept on last season's games at a new season
+    "shrink":   0.7,    # prior = SHRINK * last season's final rating
+    "cap":      40.0,   # margins clipped to +/- CAP points
 }
-
-# Features the logistic regression uses
-MODEL_FEATS = ["ADJ_DIFF", "ELO_DIFF", "H_B2B", "A_B2B"]
-C_REG = 1.0
-
-_V5_KEEP = ["GAME_ID", "ELO_DIFF", "REST_DIFF", "H_B2B", "A_B2B"]
+HOME_HALFLIFE = 400.0   # days; memory of the home-edge estimate
+MODEL_FEATS = ["ADJ_PRED", "H_B2B", "A_B2B"]
+VERSION = 2             # bump to invalidate research/cache files
 
 
 # ── games ─────────────────────────────────────────────────────────────────────
 
 def game_table(raw: pd.DataFrame) -> pd.DataFrame:
-    """One row per game: teams, points, possessions, margin (date-sorted)."""
+    """One row per game (date-sorted): teams, points, possessions, margin,
+    back-to-back flags (team played the previous day)."""
     df = raw.copy()
     df["GAME_ID"] = df["GAME_ID"].astype(str).str.zfill(10)
     df = df[df["GAME_ID"].str[:3].isin(("002", "004", "005"))]
@@ -54,52 +58,30 @@ def game_table(raw: pd.DataFrame) -> pd.DataFrame:
     df["IS_HOME"] = df["MATCHUP"].str.contains("vs.", regex=False)
     df["POSS"] = df["FGA"] + 0.44 * df["FTA"] - df["OREB"] + df["TOV"]
     df = df.sort_values(["TEAM_ID", "GAME_DATE"])
-    rest = df.groupby("TEAM_ID")["GAME_DATE"].diff().dt.days
-    df["B2B"] = (rest == 1).astype(int)
-    cols = ["GAME_ID", "GAME_DATE", "SEASON_YEAR", "TEAM_ID", "PTS", "POSS", "B2B",
-            "FG3M", "FG3A", "FTM", "FTA"]
+    df["B2B"] = (df.groupby("TEAM_ID")["GAME_DATE"].diff().dt.days == 1).astype(int)
+
+    cols = ["GAME_ID", "GAME_DATE", "SEASON_YEAR", "TEAM_ID", "PTS", "POSS", "B2B"]
     h = df[df["IS_HOME"]][cols]
     a = df[~df["IS_HOME"]][cols[:1] + cols[3:]]
     g = h.merge(a, on="GAME_ID", suffixes=("_H", "_A"))
-    g = g.rename(columns={"SEASON_YEAR": "SEASON", "TEAM_ID_H": "H", "TEAM_ID_A": "A"})
+    g = g.rename(columns={"SEASON_YEAR": "SEASON", "TEAM_ID_H": "H", "TEAM_ID_A": "A",
+                          "B2B_H": "H_B2B", "B2B_A": "A_B2B"})
     g["POSS"] = (g["POSS_H"] + g["POSS_A"]) / 2
     g["MARGIN"] = g["PTS_H"] - g["PTS_A"]
     g["RESULT"] = (g["MARGIN"] > 0).astype(int)
     return g.sort_values(["GAME_DATE", "GAME_ID"]).reset_index(drop=True)
 
 
-def luck_adjusted_margin(g: pd.DataFrame, luck3: float, luckft: float,
-                         halflife: float = 60.0) -> np.ndarray:
-    """Home margin with a share of 3P / FT shooting luck removed: makes above
-    the league rate (decayed league average up to that date) are discounted.
-    Only used as a regression TARGET, so it only affects later games."""
-    def league_rate(made, att):
-        day = g.groupby("GAME_DATE")[[made + "_H", made + "_A", att + "_H", att + "_A"]].sum()
-        m = day[made + "_H"] + day[made + "_A"]
-        a = day[att + "_H"] + day[att + "_A"]
-        t = (day.index - day.index[0]).days.values
-        w = 0.5 ** (-t / halflife)          # growing weights == decay of the past
-        rate = np.cumsum(m.values * w) / np.cumsum(a.values * w)
-        return g["GAME_DATE"].map(pd.Series(rate, index=day.index)).values
-
-    p3 = league_rate("FG3M", "FG3A")
-    pft = league_rate("FTM", "FTA")
-    l3 = (g["FG3M_H"] - g["FG3A_H"] * p3) - (g["FG3M_A"] - g["FG3A_A"] * p3)
-    lft = (g["FTM_H"] - g["FTA_H"] * pft) - (g["FTM_A"] - g["FTA_A"] * pft)
-    return (g["MARGIN"] - luck3 * 3 * l3 - luckft * lft).values
-
-
-# ── decayed ridge tracker ─────────────────────────────────────────────────────
+# ── decayed ridge ─────────────────────────────────────────────────────────────
 
 class DecayedRidge:
     """Weighted ridge regression kept as decayed normal equations.
-    Coefficients in `pen` are shrunk toward `prior` with strength lam."""
+    Coefficients flagged in `pen` are shrunk toward `prior` with strength lam."""
 
     def __init__(self, n: int, pen: np.ndarray, lam: float):
         self.A = np.zeros((n, n))
         self.b = np.zeros(n)
-        self.pen = pen.astype(float)
-        self.lam = lam
+        self.pen = lam * pen.astype(float)
         self.prior = np.zeros(n)
         self.beta = np.zeros(n)
 
@@ -107,131 +89,105 @@ class DecayedRidge:
         self.A *= f
         self.b *= f
 
-    def add(self, idx, coef, y: float, w: float = 1.0):
+    def add(self, idx, coef, y: float):
         x = np.zeros(len(self.b))
         x[idx] = coef
-        self.A += w * np.outer(x, x)
-        self.b += w * y * x
+        self.A += np.outer(x, x)
+        self.b += y * x
 
     def solve(self) -> np.ndarray:
-        P = self.lam * self.pen
-        self.beta = np.linalg.solve(self.A + np.diag(P + 1e-6),
-                                    self.b + P * self.prior)
+        self.beta = np.linalg.solve(self.A + np.diag(self.pen + 1e-6),
+                                    self.b + self.pen * self.prior)
         return self.beta
+
+    def new_season(self, teams: slice, carry: float, shrink: float):
+        """Prior <- shrink * current team ratings; old data kept at `carry`."""
+        self.prior = self.beta.copy()
+        self.prior[teams] *= shrink
+        self.decay(carry)
 
 
 def rate_history(games: pd.DataFrame, halflife: float, lam: float,
-                 carry: float, shrink: float, cap: float,
-                 team_hca: float = 0.0, b2b: bool = False,
-                 luck3: float = 0.0, luckft: float = 0.0) -> pd.DataFrame:
-    """Pre-game adjusted ratings for every game (refit once per game-day).
-    team_hca > 0 adds per-team home edges shrunk to 0 with that strength;
-    b2b adds a back-to-back term to the margin regression."""
+                 carry: float, shrink: float, cap: float) -> pd.DataFrame:
+    """Pre-game adjusted ratings for every game in `games` (one refit per day)."""
     teams = sorted(set(games["H"]) | set(games["A"]))
     tix = {t: i for i, t in enumerate(teams)}
     n = len(teams)
     H = games["H"].map(tix).values
     A = games["A"].map(tix).values
-    B2B = (games["B2B_H"] - games["B2B_A"]).values
 
-    # margin: [r_0..r_n-1, home, b2b, hca_0..hca_n-1]
-    mpen = np.r_[np.ones(n), 0.0, 0.0, np.full(n, team_hca / max(lam, 1e-9))]
-    mm = DecayedRidge(2 * n + 2, mpen, lam)
-    # per-100 offense/defense: [O_0.., D_0.., mu, home]
-    opd = np.r_[np.ones(2 * n), 0.0, 0.0]
-    od = DecayedRidge(2 * n + 2, opd, lam)
-    # pace: [p_0.., mu]
-    pc = DecayedRidge(n + 1, np.r_[np.ones(n), 0.0], lam)
-    od.prior[2 * n] = 105.0
-    pc.prior[n] = 95.0
+    mm = DecayedRidge(n + 1, np.r_[np.ones(n), 0], lam)           # [r.., home]
+    od = DecayedRidge(2 * n + 2, np.r_[np.ones(2 * n), 0, 0], lam)  # [O.., D.., mu, home]
+    pc = DecayedRidge(n + 1, np.r_[np.ones(n), 0], lam)           # [p.., mu]
+    od.prior[2 * n], pc.prior[n] = 105.0, 95.0
 
-    margin = np.clip(luck_adjusted_margin(games, luck3, luckft), -cap, cap)
+    margin = games["MARGIN"].clip(-cap, cap).values
     off_h = 100 * games["PTS_H"].values / games["POSS"].values
     off_a = 100 * games["PTS_A"].values / games["POSS"].values
     poss = games["POSS"].values
     dates = games["GAME_DATE"].values
     seasons = games["SEASON"].values
 
-    out = np.zeros((len(games), 8))
-    n_played = np.zeros(n)
-    last_date, last_season = None, None
+    out = np.zeros((len(games), 7))
+    played = np.zeros(n)
     starts = np.r_[0, np.flatnonzero(dates[1:] != dates[:-1]) + 1, len(games)]
     for s, e in zip(starts[:-1], starts[1:]):
-        d, season = dates[s], seasons[s]
-        if last_season is not None and season != last_season:
-            _new_season(mm, n, carry, shrink, team_slice=slice(0, n))
-            _new_season(od, n, carry, shrink, team_slice=slice(0, 2 * n))
-            _new_season(pc, n, carry, shrink, team_slice=slice(0, n))
-            n_played[:] = 0
-        elif last_date is not None:
-            f = 0.5 ** ((d - last_date) / np.timedelta64(1, "D") / halflife)
+        if s > 0 and seasons[s] != seasons[s - 1]:
+            mm.new_season(slice(0, n), carry, shrink)
+            od.new_season(slice(0, 2 * n), carry, shrink)
+            pc.new_season(slice(0, n), carry, shrink)
+            played[:] = 0
+        elif s > 0:
+            f = 0.5 ** ((dates[s] - dates[s - 1]) / np.timedelta64(1, "D") / halflife)
             for m in (mm, od, pc):
                 m.decay(f)
         bm, bo, bp = mm.solve(), od.solve(), pc.solve()
-        for k in range(s, e):
+
+        for k in range(s, e):                       # predict with earlier days only
             h, a = H[k], A[k]
-            net_h = (bo[h] + bo[n + h]) - (bo[a] + bo[n + a]) + bo[2 * n + 1]
-            pace = bp[n] + bp[h] + bp[a]
-            out[k] = [bm[h] - bm[a], bm[n] + bm[n + 2 + h], bm[n + 1] * B2B[k],
-                      net_h, pace, net_h * pace / 100, n_played[h], n_played[a]]
-        for k in range(s, e):
+            net100 = (bo[h] + bo[n + h]) - (bo[a] + bo[n + a]) + bo[2 * n + 1]
+            out[k] = [bm[h] - bm[a], bm[n], net100, bp[n] + bp[h] + bp[a],
+                      bo[h] - bo[n + a], bo[a] - bo[n + h], min(played[h], played[a])]
+        for k in range(s, e):                       # then learn from this day
             h, a = H[k], A[k]
-            idx, coef = [h, a, n], [1, -1, 1]
-            if b2b:
-                idx, coef = idx + [n + 1], coef + [B2B[k]]
-            if team_hca > 0:
-                idx, coef = idx + [n + 2 + h], coef + [1]
-            mm.add(idx, coef, margin[k])
+            mm.add([h, a, n], [1, -1, 1], margin[k])
             od.add([h, n + a, 2 * n, 2 * n + 1], [1, -1, 1, 0.5], off_h[k])
             od.add([a, n + h, 2 * n, 2 * n + 1], [1, -1, 1, -0.5], off_a[k])
             pc.add([h, a, n], [1, 1, 1], poss[k])
-            n_played[h] += 1
-            n_played[a] += 1
-        last_date, last_season = d, season
+            played[h] += 1
+            played[a] += 1
 
-    cols = ["ADJ_DIFF", "ADJ_HOME", "ADJ_B2B", "NET100_PRED", "PACE_PRED",
-            "NET_PTS_PRED", "NG_H", "NG_A"]
+    cols = ["ADJ_DIFF", "ADJ_HOME", "NET100_PRED", "PACE_PRED",
+            "OFF100_H", "OFF100_A", "MIN_GAMES"]
     res = pd.DataFrame(out, columns=cols)
     res.insert(0, "GAME_ID", games["GAME_ID"].values)
     return res
 
 
-def _new_season(m: DecayedRidge, n: int, carry: float, shrink: float, team_slice):
-    """Season boundary: prior <- shrink * final ratings, old data kept at carry."""
-    m.prior = m.beta.copy()
-    m.prior[team_slice] *= shrink
-    m.decay(carry)
-
-
 # ── benchmark interface ───────────────────────────────────────────────────────
 
-def build_dataset(raw: pd.DataFrame, params: dict = None) -> pd.DataFrame:
-    params = {**PARAMS, **(params or {})}
-    key = hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()[:10]
-    path = os.path.join(CACHE_DIR, f"adj_ratings_{key}.csv")
+def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
+    key = json.dumps([VERSION, PARAMS, HOME_HALFLIFE], sort_keys=True)
+    path = os.path.join(CACHE_DIR, f"adj_ratings_{hashlib.md5(key.encode()).hexdigest()[:10]}.csv")
     if os.path.exists(path):
         df = pd.read_csv(path, dtype={"GAME_ID": str})
         df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"])
         return df
+
     games = game_table(raw)
-    feats = rate_history(games, **params)
-    v5 = baseline_dataset(raw)[_V5_KEEP]
-    df = (games[["GAME_ID", "GAME_DATE", "SEASON", "RESULT", "MARGIN"]]
-          .merge(feats, on="GAME_ID").merge(v5, on="GAME_ID"))
+    feats = rate_history(games, **PARAMS)
+    home = rate_history(games, **{**PARAMS, "halflife": HOME_HALFLIFE,
+                                  "carry": 1.0, "shrink": 1.0})
+    feats["HOME_EDGE"] = home["ADJ_HOME"].values
+    feats["ADJ_PRED"] = feats["ADJ_DIFF"] + feats["HOME_EDGE"]
+    df = games[["GAME_ID", "GAME_DATE", "SEASON", "RESULT", "MARGIN",
+                "H_B2B", "A_B2B"]].merge(feats, on="GAME_ID")
     os.makedirs(CACHE_DIR, exist_ok=True)
     df.to_csv(path, index=False)
     return df
 
 
-def _X(df: pd.DataFrame, feats=None) -> np.ndarray:
-    X = df[feats or MODEL_FEATS].astype(float).copy()
-    if "ELO_DIFF" in X:
-        X["ELO_DIFF"] = X["ELO_DIFF"] / 25.0     # ~ points scale
-    return X.values
-
-
-def fit_predict(train: pd.DataFrame, test: pd.DataFrame, feats=None,
-                C: float = C_REG) -> np.ndarray:
-    lr = LogisticRegression(C=C, max_iter=1000)
-    lr.fit(_X(train, feats), train["RESULT"].values)
-    return lr.predict_proba(_X(test, feats))[:, 1]
+def fit_predict(train: pd.DataFrame, test: pd.DataFrame) -> np.ndarray:
+    lr = LogisticRegression(max_iter=1000)
+    lr.fit(train[MODEL_FEATS].values, train["RESULT"].values)
+    return lr.predict_proba(test[MODEL_FEATS].values)[:, 1]
