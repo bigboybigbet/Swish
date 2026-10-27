@@ -28,6 +28,29 @@ left, else 0, where stake = P(postseason | W) - P(postseason | L) +
 same for top-4 seed + same for the 1 seed.  Full-season stake, the tank
 incentive and the rest / dead flags added nothing on dev (FULL_INCENTIVE is
 reported as a pre-declared secondary set, not selected).
+
+Results (research/variants/incentives_eval.py; holdout 2017-18..2023-24 run
+once): overall logloss 0.6277 -> 0.6270 (d -0.0007 +- 0.0006, not a win);
+last-20-games subset d -0.0028 +- 0.0025; with the who-plays control the
+gain shrinks to -0.0003 +- 0.0005.  Who-plays itself: -0.0055 +- 0.0011.
+2019-20 (bubble) is the only season where it clearly hurts; the last three
+seasons show no effect.  Not recommended for production as is.
+
+Live use (each morning, before predictions):
+  1. logs = nba_api leaguegamefinder team logs up to yesterday (the app
+     already pulls them); schedule = this season's regular-season fixtures
+     (nba_api scheduleleaguev2 or ESPN), only dates and teams are used;
+  2. incentives_sim.live_day(logs, schedule, today, season) refits the
+     ridge ratings on games before today, builds W-L from completed games,
+     simulates every remaining fixture 2,000 times (~0.1-0.3 s) and returns
+     leverage / tank / flags / standings for today's games;
+  3. team_features() + D_STAKE_LATE as in build_dataset, then the logistic
+     fitted on the last three completed seasons;
+  4. who-plays: MISS5 from the official injury report / inactive list
+     (~30 min before tip) against the last-10-games minutes leaders.
+  Rule changes to watch: play-in format, lottery odds, and since 2023-24
+  the two in-season-tournament games per team that are scheduled only in
+  December (add them as phantom games, like 2019-20, until they are known).
 """
 import numpy as np
 import pandas as pd

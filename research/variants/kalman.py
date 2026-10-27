@@ -18,8 +18,12 @@ fit_predict maps z = μ/s to P(home win) with a probit fitted on the train
 seasons (Φ(z) itself is already close; the fit corrects the slightly
 peaked margin distribution).
 
-Hyperparameters: filter noise/dynamics by maximising the dev-window
-(2014-15 … 2016-17) Gaussian log likelihood of the margins.
+Hyperparameters (kalman_engine.PARAMS / PLAYER_PARAMS) were chosen by
+maximising the dev-window (2014-15 … 2016-17) Gaussian predictive log
+likelihood of the margins (Nelder-Mead for the filter, coordinate search for
+the player values); σ_t is the totals' own likelihood value.  Dev log loss
+(walk-forward, probit on the 3 train seasons), Elo 0.6036:
+    team-only filter 0.5996 · net + lineup 0.5906 · od + lineup 0.5903
 """
 import hashlib
 import json
