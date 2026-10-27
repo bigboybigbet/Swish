@@ -129,15 +129,6 @@ Trên macOS / Linux:
 NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 ./start.sh
 ```
 
-## Giao diện cũ (Streamlit)
-
-Trang Bets (ROI) của web app chưa làm xong. Trong lúc chờ, bạn vẫn dùng được app cũ, chạy cùng model mới:
-
-```bash
-.venv\Scripts\streamlit run nba_app.py     # Windows
-.venv/bin/streamlit run nba_app.py         # macOS / Linux
-```
-
 ## Gặp lỗi thì làm gì
 
 | Lỗi | Cách xử lý |

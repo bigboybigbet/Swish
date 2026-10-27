@@ -251,7 +251,7 @@ def distributions(mc: dict, with_hist: bool) -> dict:
 
 
 def radar_values(s: dict) -> list:
-    """Six 0–1 axes (same scaling as the Streamlit radar)."""
+    """Six 0–1 axes (fixed scaling, comparable across teams)."""
     vals = [s["eFG_PCT"], s["TS_PCT"], min(s["AST_TOV"], 5) / 5, s["OREB_PCT"],
             s["REB"] / 50, (s["PLUS_MINUS"] + 15) / 30]
     return [r4(max(0.0, min(1.0, v))) for v in vals]

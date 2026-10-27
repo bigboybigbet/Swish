@@ -25,8 +25,8 @@ It runs as a local web app (FastAPI + HTML, no build step, works offline). Every
 - Adjusts both teams for injured players, weighted by status (out, doubtful, questionable, day-to-day)
 - Simulates 50,000 correlated score pairs per game for spread and total ranges
 - Converts bookmaker moneylines to implied probabilities and sizes stakes with a fractional Kelly criterion
-- Back-tests any date range blind, then learns its blend weights from the results
-- Keeps a prediction and bet history with ROI tracking, and can push picks to Telegram
+- Grades new results as they come in (Model page, Grade new games) and rebuilds the ratings from them
+- Grades every finished game against its pre-game prediction (Accuracy page) and ranks teams by rating (Ratings page)
 
 ## How a prediction is made
 
@@ -148,10 +148,6 @@ NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 ./start.sh
 
 On Windows PowerShell: `$env:NBA_HISTORY_DIR="..\nba-data-2010-2024"; $env:NBA_QUANT_DEMO_DATE="2024-03-15"; .\start.bat`.
 
-### The previous interface
-
-The Streamlit app still works and uses the same model: `.venv\Scripts\streamlit run nba_app.py` on Windows, `.venv/bin/streamlit run nba_app.py` on macOS / Linux. The Bets page of the web app is still being built, so use Streamlit for the ROI log until then.
-
 ### Troubleshooting
 
 | Problem | Fix |
@@ -182,7 +178,6 @@ research/
   benchmark.py           walk-forward benchmark on 2010-24 games
   variants/              every model tried, with its benchmark code
 tests/                   offline tests (pytest)
-nba_app.py               previous Streamlit interface
 config.py                constants and season roll-over
 ```
 

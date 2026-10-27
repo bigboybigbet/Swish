@@ -1,7 +1,7 @@
 """
 Standalone Optuna hyperparameter tuner for the NBA XGBoost model.
 Run directly:  python optuna_tuner.py [n_trials]
-Called automatically by nba_app.py via subprocess when Optuna HPO is enabled.
+Called by the Train job (server) via subprocess when Optuna HPO is enabled.
 Writes best params to optuna_best_params.json on success.
 """
 import json
