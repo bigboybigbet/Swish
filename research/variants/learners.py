@@ -13,9 +13,14 @@ models, both anchored on Elo:
     chosen by early stopping on the last 20% of the train frame (time
     order), then refit on the whole frame.
 
-No extra calibration layer: Platt on a held-out slice was neutral and
-isotonic hurt (dev).  All choices were made on the dev window
-(2014-15 … 2016-17); see the result notes for the numbers.
+Dev window (2014-15 … 2016-17, 3,936 games), log loss, d vs elo:
+  elo 0.6036 | v5 0.6245 (+0.021) | L2 logistic C=0.03 0.6028 (-0.0009)
+  Elo-init monotone GBM 0.6021 (-0.0016) | this ensemble 0.6016 (-0.0020)
+  plain shallow GBM / XGB without the Elo init: +0.001 … +0.003
+  Platt on the last 20% of train: neutral/worse; isotonic: +0.011
+  production BlendCalibrator (xgb, mc, elo/400) refit on time-ordered OOF
+  rows: 0.6033, no better than recalibrated Elo alone (0.6032).
+No extra calibration layer is applied.
 
 build_dataset also adds the 10-game score SDs used by the live Monte Carlo
 and its analytic probability MC_P, so the production blend can be measured.
