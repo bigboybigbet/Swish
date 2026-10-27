@@ -197,7 +197,8 @@ def rankings(raw: pd.DataFrame = None, box: pd.DataFrame = None) -> pd.DataFrame
     raw = load_history() if raw is None else raw
     box = load_box() if box is None else box
     kf, _, last = live_state(raw, box)
-    names = raw.drop_duplicates("TEAM_ID", keep="last").set_index("TEAM_ID")["TEAM_ABBREVIATION"]
+    names = (raw.sort_values("GAME_DATE").drop_duplicates("TEAM_ID", keep="last")
+             .set_index("TEAM_ID")["TEAM_ABBREVIATION"])
     tab = kf.ratings(last)
     tab.insert(1, "TEAM", tab["TEAM_ID"].map(names))
     return tab

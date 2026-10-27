@@ -2,40 +2,41 @@
 Rating engine for the player_elo variant: Elo for players, on the point scale.
 
 Every player i carries
-    r_i   impact rating, points of team margin per 48 on-court minutes above an
-          average player (five +2 players make a +10 team),
-    P_i   variance of r_i (the Kalman "K": big for new players, small for
-          veterans, widened at each new season),
-    b_i   box rating: decayed per-48 Game Score, shrunk toward the current
-          league average (and toward a replacement-level offset for new
-          players),
-    em_i  expected minutes if he plays: EWMA of minutes in games he played,
-    ea_i  expected minutes if he dresses: same EWMA with 0 for games he was
-          active but unused (DNP - coach's decision); used live, where only
-          the active roster is known before tip-off.
+    r_i   impact rating (points of team margin per 48 on-court minutes),
+    P_i   its variance: the Kalman "K".  New players start wide (fast moves),
+          every game shrinks it (veterans move slowly), q per game and
+          v_season per offseason widen it again,
+    box_i box rating: gamma * decayed per-48 Game Score above the current
+          league average, shrunk over box_prior minutes, plus a decaying
+          replacement-level offset for players who debut,
+    em_i  expected minutes if he plays (EWMA over games played),
+    ea_i  expected minutes if he dresses (same EWMA, 0 for an unused game);
+          the live app only knows the active roster, so it uses ea.
 
-Pre-game, from the players who will play (w_i = expected share, sum 5):
+Pre-game, from the players available (R_i = r_i + box_i, Rbar = league
+minute-weighted mean of R):
 
-    w_i       = 5 * em_i^a / sum_team(em^a)
-    R_i       = r_i + gamma * b_i                 (full rating, pts / 48)
-    E[margin] = hfa + sum_home w R - sum_away w R
-    sd        = sqrt(sigma^2 + sum w^2 P)
+    w_i       = 5 * em_i^a / sum_team(em^a)              (shares, sum 5)
+    T_team    = sum_i w_i (R_i - Rbar)       (points vs an average team)
+    E[margin] = hfa + T_home - T_away
+    sd        = sqrt(sigma^2 + sum_i w_i^2 P_i)
 
 After the game, with the minutes actually played (h_i = 5 * min_i / team
 minutes, negative for the away side):
   1. team margin, Kalman with a diagonal covariance:
        e = clip(M, ±cap) - E[margin | h],   S = sigma^2 + sum h^2 P
        r_i += P_i h_i e / S,   P_i -= (P_i h_i)^2 / S
-     so the error is split in proportion to minutes and uncertainty;
+     i.e. the error is split in proportion to minutes, with K_i = P_i / S;
   2. on-court plus-minus, within team: with f_i the share of the game on
-     court, d_i = PM_i - f_i M_team has mean f_i (1 - f_i)(R_i - Rbar_-i), so
+     court, d_i = PM_i - f_i M_team has mean f_i (1 - f_i)(R_i - Rbar_-i)
+     (Rbar_-i = teammates' minute-weighted mean), so
        r_i += P_i (d_i - E d_i) / (f_i (1 - f_i) P_i + sigma_pm^2)
      re-centred so the team's minute-weighted total is unchanged;
   3. box rating, expected minutes and counters are refreshed; P_i += q.
 
-At a new season: r *= carry (toward the mean), P += v_season (capped at
-p_max), box evidence *= box_carry.  Unseen players start at a
-replacement-level prior (r0 < 0 and a negative box offset b0).
+At a new season: r *= carry (partial regression toward the mean),
+P += v_season (capped at p_max), box evidence *= box_carry.  Unseen players
+start at a replacement-level prior (r0 < 0, box offset gamma * b0 < 0).
 """
 import pickle
 
@@ -100,6 +101,7 @@ class PlayerElo:
         self.tr, self.tP = {}, {}           # team effects and variances
         self.hfa = p["hfa"]
         self.xm = 0.0                       # league Game Score per 48
+        self.rmean = 0.0                    # league minute-weighted mean of R
         self.season, self.n_seasons, self.n_games = None, 0, 0
         self._a_min = 1 - 0.5 ** (1 / p["min_hl"])
         self._a_box = 0.5 ** (1 / p["box_hl"])
@@ -167,8 +169,9 @@ class PlayerElo:
         imp, box = float(w @ self.r[j]), float(w @ self.box(j))
         t = self.tr.get(team, 0.0)
         var = float(w ** 2 @ self.P[j] + self.tP.get(team, 0.0))
-        return {"strength": imp + box + t, "impact": imp, "box": box,
-                "team": t, "var": var}
+        # strength is centred on the league-average player (5 * rmean)
+        return {"strength": imp + box + t - 5 * self.rmean, "impact": imp,
+                "box": box, "team": t, "var": var}
 
     def team_strength(self, team, players, minutes=None, play_prob=None,
                       dressed=True) -> dict:
@@ -241,7 +244,9 @@ class PlayerElo:
         gs = np.concatenate([box_h, box_a])
         ok = mins > 0
         self.n_games += 1
-        self.xm += (48 * gs.sum() / max(mins.sum(), 1.0) - self.xm) / min(self.n_games, 500)
+        rate = 1 / min(self.n_games, 500)
+        self.xm += rate * (48 * gs.sum() / max(mins.sum(), 1.0) - self.xm)
+        self.rmean += rate * (np.abs(h) @ R / 10 - self.rmean)
         jj = j[ok]
         self.bn[jj] = self._a_box * self.bn[jj] + gs[ok]
         self.bd[jj] = self._a_box * self.bd[jj] + mins[ok]
@@ -279,13 +284,14 @@ class PlayerElo:
 
     # ── inspection / persistence ─────────────────────────────────────────────
     def leaderboard(self, n=10, min_games=20, active_since=None) -> list:
-        """Top players by full rating R (points per 48 above average)."""
+        """Top players by full rating (points per 48 above the average
+        player = impact + box)."""
         m = len(self.ids)
         ok = self.n[:m] >= min_games
         if active_since is not None:
             ok &= self.last_day[:m] >= active_since
         j = np.flatnonzero(ok)
-        R, B = self.rating(j), self.box(j)
+        R, B = self.rating(j) - self.rmean, self.box(j) - self.rmean
         o = np.argsort(-R)[:n]
         return [{"player_id": self.ids[k], "name": self.names[k],
                  "rating": round(float(R[i]), 2),
