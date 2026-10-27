@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 MODEL_FILE         = "nba_brain_v5.joblib"
@@ -8,10 +9,14 @@ OPTUNA_PARAMS_FILE = "optuna_best_params.json"
 PLAYER_IMPACT_FILE = "player_impact.json"
 CACHE_DB           = "nba_cache.db"
 BLEND_FILE         = "nba_blend_calibrator.json"
+TEAM_STRENGTH_FILE = "team_strength.json"
 
 N_SIMS    = 50_000
 HOME_ADV  = 2.8     # points of home-court advantage (split ± in simulations)
 MC_CORR   = 0.30    # correlation between the two teams' scores (shared pace)
+
+# Training parallelism: leave one core for the web server and the OS.
+N_JOBS    = max(1, (os.cpu_count() or 2) - 1)
 
 def season_string(start_year: int) -> str:
     return f"{start_year}-{str(start_year + 1)[-2:]}"
