@@ -542,8 +542,11 @@ class JobManager:
             self._finish(job, state, error)
 
     def _finish(self, job: Job, state: str, error: str | None = None):
-        """Mark a job finished (caller holds the lock), persist, notify listeners."""
-        job.state = state
+        """Mark a job finished (caller holds the lock), persist, notify listeners.
+
+        `state` is assigned last: readers poll without the lock, and a job that
+        already reads as finished must already carry its error and timestamps.
+        """
         job.error = redact(error) if error else None
         job.finished_at = clock.iso_utc()
         if state == "done":
@@ -552,6 +555,7 @@ class JobManager:
                 job.done = job.total
         job.stage = {"done": "Finished", "cancelled": "Cancelled",
                      "interrupted": "Interrupted"}.get(state, "Failed")
+        job.state = state
         self._emit(job, "progress", _progress_data(job))
         self._emit(job, "done", _done_data(job))
         threading.Thread(target=self._after_finish, args=(job,), daemon=True).start()

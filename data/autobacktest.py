@@ -217,11 +217,12 @@ def run_auto_backtest(model, status_cb=None, should_stop=None, progress_cb=None)
 
     # Rebuild the team strength ratings from scratch so they include the new
     # results (a full replay: no game can be counted twice).
-    try:
-        from engine import team_strength
-        team_strength.refresh(status_cb=report)
-    except Exception as e:
-        report(f"Team strength not refreshed: {e}")
+    if actual_processed:
+        try:
+            from engine import team_strength
+            team_strength.refresh(status_cb=report)
+        except Exception as e:
+            report(f"Team strength not refreshed: {e}")
 
     acc = correct / actual_processed if actual_processed > 0 else 0.0
     report(

@@ -40,3 +40,11 @@ def client(app):
     from fastapi.testclient import TestClient
     with TestClient(app, base_url=BASE_URL, client=("127.0.0.1", 50000)) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _no_nba_api_downloads(monkeypatch):
+    """No test may download season logs: on CI stats.nba.com hangs until its
+    timeout instead of failing fast.  Tests that need logs pass them in."""
+    import engine.models
+    monkeypatch.setattr(engine.models, "fetch_game_logs", lambda *a, **k: None)
