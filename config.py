@@ -1,3 +1,5 @@
+from datetime import datetime
+
 MODEL_FILE         = "nba_brain_v5.joblib"
 DATASET_FILE       = "master_dataset_v5.csv"
 ELO_FILE           = "elo_ratings.json"
@@ -11,9 +13,29 @@ N_SIMS    = 50_000
 HOME_ADV  = 2.8     # points of home-court advantage (split ± in simulations)
 MC_CORR   = 0.30    # correlation between the two teams' scores (shared pace)
 
-# Seasons used to build the training dataset.  Recency weighting
-# (RECENCY_HALFLIFE_DAYS) discounts older seasons automatically.
-TRAIN_SEASONS          = ["2023-24", "2024-25", "2025-26"]
+def season_string(start_year: int) -> str:
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+def current_season(today=None) -> str:
+    """NBA season for a date: a season tips off in October, so Oct–Dec
+    belong to the season starting that year, Jan–Sep to the previous one."""
+    today = today or datetime.today()
+    return season_string(today.year if today.month >= 10 else today.year - 1)
+
+
+def recent_seasons(n: int, today=None) -> list:
+    """The n most recent seasons, oldest first, ending with the current one."""
+    end = int(current_season(today)[:4])
+    return [season_string(y) for y in range(end - n + 1, end + 1)]
+
+
+# Seasons used to build the training dataset, rolled forward automatically
+# (on 2026-10-27 → 2024-25, 2025-26, 2026-27).  Recency weighting
+# (RECENCY_HALFLIFE_DAYS) discounts older seasons.
+N_TRAIN_SEASONS        = 3
+TRAIN_SEASONS          = recent_seasons(N_TRAIN_SEASONS)
+CURRENT_SEASON         = TRAIN_SEASONS[-1]
 RECENCY_HALFLIFE_DAYS  = 150
 
 # v5 — matchup-level features: every row is ONE GAME (home vs away),

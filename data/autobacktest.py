@@ -6,13 +6,14 @@ import pandas as pd
 from nba_api.stats.endpoints import leaguegamefinder
 from nba_api.stats.static import teams as nba_teams_static
 
+from config import recent_seasons
 from data.elo import load_elo, save_elo, update_elo_game
 from engine.features import get_team_advanced_stats
 from engine.models import BlendCalibrator, predict_hybrid
 
 AUTOBACKTEST_LOG = "autobacktest_log.json"
 AUTOBACKTEST_CSV = "autobacktest_results.csv"
-SEASONS = ["2024-25", "2025-26"]
+SEASONS = recent_seasons(2)   # previous + current season
 
 _TEAM_MAP = {t["id"]: t["full_name"] for t in nba_teams_static.get_teams()}
 

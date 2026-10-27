@@ -13,6 +13,11 @@ from sklearn.metrics import accuracy_score, log_loss
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 from xgboost import XGBClassifier
 
+try:                                   # scikit-learn >= 1.6
+    from sklearn.frozen import FrozenEstimator
+except ImportError:                    # older releases still accept cv="prefit"
+    FrozenEstimator = None
+
 from config import (BLEND_FILE, DATASET_FILE, ELO_DEFAULT, FEATURE_COLS,
                     MODEL_FILE, OPTUNA_PARAMS_FILE, RECENCY_HALFLIFE_DAYS,
                     TRAIN_SEASONS)
@@ -137,21 +142,35 @@ def get_feature_importance(model) -> dict:
     if hasattr(model, "feature_importances_"):
         imp = model.feature_importances_
     elif hasattr(model, "calibrated_classifiers_"):
-        imps = [
-            cc.estimator.feature_importances_
-            for cc in model.calibrated_classifiers_
-            if hasattr(getattr(cc, "estimator", None), "feature_importances_")
-        ]
+        ests = [_base_estimator(getattr(cc, "estimator", None))
+                for cc in model.calibrated_classifiers_]
+        imps = [e.feature_importances_ for e in ests
+                if hasattr(e, "feature_importances_")]
         imp = np.mean(imps, axis=0) if imps else np.zeros(len(FEATURE_COLS))
     else:
         imp = np.zeros(len(FEATURE_COLS))
     return dict(zip(FEATURE_COLS, imp.tolist()))
 
 
+def _calibrate_prefit(est, X_cal, y_cal, method: str = "sigmoid"):
+    """Calibrate an already-fitted classifier on a held-out split."""
+    if FrozenEstimator is not None:
+        model = CalibratedClassifierCV(FrozenEstimator(est), method=method)
+    else:
+        model = CalibratedClassifierCV(est, cv="prefit", method=method)
+    return model.fit(X_cal, y_cal)
+
+
+def _base_estimator(est):
+    """Strip a FrozenEstimator wrapper, if any."""
+    return getattr(est, "estimator", est) if FrozenEstimator is not None \
+        and isinstance(est, FrozenEstimator) else est
+
+
 def unwrap_xgb(model):
     """Extract raw XGBClassifier from a CalibratedClassifierCV (needed by SHAP)."""
     if hasattr(model, "calibrated_classifiers_") and model.calibrated_classifiers_:
-        return model.calibrated_classifiers_[0].estimator
+        return _base_estimator(model.calibrated_classifiers_[0].estimator)
     return model
 
 
@@ -200,24 +219,10 @@ def _calc_streak(s: pd.Series) -> pd.Series:
     return pd.Series(out, index=s.index)
 
 
-def build_master_dataset(seasons=None, status_cb=None):
-    """
-    v5 — MATCHUP-LEVEL dataset.
-
-    Every row is one game: home team's rolling form vs away team's rolling
-    form, expressed as differentials, plus a chronologically-computed
-    pre-game MOV-Elo difference.  All rolling stats use shift(1) so nothing
-    from the game itself leaks into its own features.
-
-    Side effect: saves up-to-date Elo ratings to ELO_FILE so live
-    predictions use real ratings instead of the 1500 default.
-    """
-    def report(msg):
-        print(msg) if status_cb is None else status_cb(msg)
-
+def fetch_game_logs(seasons=None, report=print) -> pd.DataFrame | None:
+    """Team game logs (one row per team per game) from the NBA API."""
     if seasons is None:
         seasons = TRAIN_SEASONS
-
     all_games = []
     for s in seasons:
         try:
@@ -226,13 +231,48 @@ def build_master_dataset(seasons=None, status_cb=None):
             )
             all_games.append(finder.get_data_frames()[0])
             time.sleep(1.0)
-        except Exception:
-            pass
+        except Exception as e:
+            report(f"Could not fetch {s}: {e}")
     if not all_games:
         return None
+    return pd.concat(all_games, ignore_index=True)
 
-    df = pd.concat(all_games, ignore_index=True)
-    df = df[df["GAME_ID"].astype(str).str[:3].isin(_VALID_GAME_PREFIXES)]
+
+def build_master_dataset(seasons=None, status_cb=None):
+    """
+    v5 — MATCHUP-LEVEL dataset, downloaded from the NBA API.
+
+    Side effect: saves up-to-date Elo ratings to ELO_FILE so live
+    predictions use real ratings instead of the 1500 default.
+    """
+    def report(msg):
+        print(msg) if status_cb is None else status_cb(msg)
+
+    raw = fetch_game_logs(seasons, report)
+    if raw is None:
+        return None
+    out, elo = build_matchup_dataset(raw, report)
+    save_elo(elo)
+    report("Elo ratings replayed chronologically and saved (live ratings updated)")
+    out.to_csv(DATASET_FILE, index=False)
+    report(f"Dataset built: {len(out):,} matchup rows saved to {DATASET_FILE}")
+    return out
+
+
+def build_matchup_dataset(raw: pd.DataFrame, report=print) -> tuple:
+    """
+    Pure feature builder: team game logs (leaguegamefinder format) →
+    (matchup rows, final Elo dict keyed by team name).
+
+    Every row is one game: home team's rolling form vs away team's rolling
+    form, expressed as differentials, plus a chronologically-computed
+    pre-game MOV-Elo difference.  All rolling stats use shift(1) so nothing
+    from the game itself leaks into its own features.  No I/O, so the
+    research benchmark runs the exact same code on historical data.
+    """
+    df = raw.copy()
+    df["GAME_ID"] = df["GAME_ID"].astype(str).str.zfill(10)
+    df = df[df["GAME_ID"].str[:3].isin(_VALID_GAME_PREFIXES)]
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"])
     df["IS_HOME"]   = df["MATCHUP"].str.contains("vs.", regex=False).astype(int)
     df["RESULT"]    = (df["WL"] == "W").astype(int)
@@ -281,7 +321,7 @@ def build_master_dataset(seasons=None, status_cb=None):
     team_feats = ["NET5", "NET15", "PTS10", "PA10", "EFG10", "TOV10",
                   "ORB10", "FTR10", "PACE10", "WPCT10", "WIN_STREAK",
                   "DAYS_REST", "IS_B2B", "VENUE_WPCT"]
-    keep = ["GAME_ID", "GAME_DATE", "TEAM_NAME", "PLUS_MINUS", "RESULT"] + team_feats
+    keep = ["GAME_ID", "GAME_DATE", "TEAM_ID", "TEAM_NAME", "PLUS_MINUS", "RESULT"] + team_feats
 
     home  = df[df["IS_HOME"] == 1][keep]
     away  = df[df["IS_HOME"] == 0][keep]
@@ -290,16 +330,19 @@ def build_master_dataset(seasons=None, status_cb=None):
     report(f"Paired {len(games):,} matchup rows from {len(df):,} team rows")
 
     # ── chronological pre-game Elo (no leakage) ───────────────────────────
+    # Keyed by TEAM_ID so franchise renames (Bobcats → Hornets) keep their
+    # rating; exported by latest team name for the live lookup.
     elo: dict = {}
+    names: dict = {}
     elo_h, elo_a = [], []
     for r in games.itertuples(index=False):
-        h, a = r.TEAM_NAME_H, r.TEAM_NAME_A
+        h, a = r.TEAM_ID_H, r.TEAM_ID_A
+        names[h], names[a] = r.TEAM_NAME_H, r.TEAM_NAME_A
         elo_h.append(elo.get(h, ELO_DEFAULT))
         elo_a.append(elo.get(a, ELO_DEFAULT))
         update_elo_game(h, a, r.RESULT_H == 1, float(r.PLUS_MINUS_H), elo)
     games["ELO_H"], games["ELO_A"] = elo_h, elo_a
-    save_elo(elo)
-    report("Elo ratings replayed chronologically and saved (live ratings updated)")
+    elo_by_name = {names[t]: v for t, v in elo.items()}
 
     # ── matchup differential features ─────────────────────────────────────
     out = pd.DataFrame({
@@ -324,10 +367,9 @@ def build_master_dataset(seasons=None, status_cb=None):
         "A_AWAY_WPCT": games["VENUE_WPCT_A"],
         "RESULT":      games["RESULT_H"],
     })
+    out["MARGIN"] = games["PLUS_MINUS_H"]
     out = out.dropna(subset=FEATURE_COLS + ["RESULT"]).reset_index(drop=True)
-    out.to_csv(DATASET_FILE, index=False)
-    report(f"Dataset built: {len(out):,} matchup rows saved to {DATASET_FILE}")
-    return out
+    return out, elo_by_name
 
 
 # ── training ──────────────────────────────────────────────────────────────────
@@ -363,6 +405,19 @@ def train_model(force_rebuild: bool = False, use_optuna: bool = False,
     if df is None or df.empty:
         return None, 0, None
 
+    model, metrics = fit_matchup_model(df, use_optuna=use_optuna, report=report)
+    dump(model, MODEL_FILE)
+    report(
+        f"Model saved — val_acc={metrics['val_acc']:.3f} "
+        f"val_loss={metrics['val_loss']:.4f} "
+        f"n_train={metrics['n_train']:,}"
+    )
+    return model, len(df), metrics
+
+
+def fit_matchup_model(df: pd.DataFrame, use_optuna: bool = False,
+                      report=print) -> tuple:
+    """Fit + calibrate on a matchup dataset; returns (model, metrics). No I/O."""
     df = df.sort_values("GAME_DATE").reset_index(drop=True)
     X  = df[FEATURE_COLS]
     y  = df["RESULT"]
@@ -409,8 +464,7 @@ def train_model(force_rebuild: bool = False, use_optuna: bool = False,
     # parameters so it stays stable even with a small calibration set
     if len(X_cal) >= 20:
         report("Calibrating probabilities (Platt sigmoid)…")
-        model = CalibratedClassifierCV(xgb, cv="prefit", method="sigmoid")
-        model.fit(X_cal, y_cal)
+        model = _calibrate_prefit(xgb, X_cal, y_cal)
     else:
         report("Not enough calibration data — skipping calibration step")
         model = xgb
@@ -428,13 +482,7 @@ def train_model(force_rebuild: bool = False, use_optuna: bool = False,
         "val_proba":  vproba.tolist(),
         "val_y":      y_val.tolist(),
     }
-    dump(model, MODEL_FILE)
-    report(
-        f"Model saved — val_acc={metrics['val_acc']:.3f} "
-        f"val_loss={metrics['val_loss']:.4f} "
-        f"n_train={metrics['n_train']:,}"
-    )
-    return model, len(df), metrics
+    return model, metrics
 
 
 # ── prediction ────────────────────────────────────────────────────────────────
