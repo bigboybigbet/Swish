@@ -3,6 +3,10 @@
 </p>
 
 <p align="center">
+  <a href="docs/HUONG_DAN.md">🇻🇳 Hướng dẫn tiếng Việt</a>
+</p>
+
+<p align="center">
   <a href="https://github.com/bigboybigbet/nba_app_quant/actions/workflows/ci.yml"><img src="https://github.com/bigboybigbet/nba_app_quant/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/season-2026--27-f97316" alt="Season 2026-27">
@@ -12,7 +16,7 @@ NBA Quant predicts every NBA game before tip-off: the home team's win probabilit
 
 The model rates every team in points above average, with an uncertainty band, using a Kalman filter: each result moves a team's rating by an amount that depends on how sure the model already was, ratings regress 20% toward average each summer, and the second night of a back-to-back costs a point. The expected margin becomes a win probability through a logistic curve fitted on the last three seasons.
 
-Every modelling change is judged on the same yardstick: a walk-forward backtest over seven held-out seasons (8,874 real games) in which the model only ever sees games played before the one it predicts.
+It runs as a local web app (FastAPI + HTML, no build step, works offline). Every modelling change is judged on the same yardstick: a walk-forward backtest over seven held-out seasons (8,874 real games) in which the model only ever sees games played before the one it predicts.
 
 ## What it does
 
@@ -59,53 +63,121 @@ git clone --depth 1 https://github.com/NocturneBear/NBA-Data-2010-2024 ../nba-da
 NBA_HISTORY_DIR=../nba-data-2010-2024 python -m research.benchmark --variants v5,elo,elo_plus --reference elo
 ```
 
-## Quick start
+## Getting started
 
-The app now runs as a local web app (FastAPI + HTML, no build step, works offline). The Streamlit app still works while the remaining pages are built.
+### 1. Requirements
+
+- Python 3.11 or newer (`python --version`)
+- Git
+- A normal home or office internet connection. NBA.com's stats API often blocks cloud servers and some VPNs; if downloads time out, switch the VPN off.
+
+### 2. Install
 
 ```bash
 git clone https://github.com/bigboybigbet/nba_app_quant.git
 cd nba_app_quant
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python -m server                 # web app on http://127.0.0.1:8000
-streamlit run nba_app.py         # previous interface, still available
+python -m venv .venv
 ```
 
-Web pages so far: Game (single-game analysis with the probability breakdown), Model (train, auto-backtest, player impact, with live progress) and Settings (API keys stored in `.env`, never sent to the browser). Slate, Accuracy, Bets and Ratings are next. Try it without network access by replaying a past date: `NBA_QUANT_DEMO_DATE=2024-03-15 python -m server`, with the historical logs from the benchmark section in `NBA_HISTORY_DIR`.
+Activate the virtual environment:
 
-On first launch, press **Train** (*Force full rebuild*). The app downloads the 2023-24 to 2026-27 seasons, replays the team-strength ratings through every game, and trains the reference models (a few minutes). Training seasons roll forward automatically each October.
+| System | Command |
+|---|---|
+| macOS / Linux | `source .venv/bin/activate` |
+| Windows PowerShell | `.venv\Scripts\Activate.ps1` (if blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`) |
+| Windows cmd | `.venv\Scripts\activate.bat` |
 
-Optional keys, entered in the app's settings tab and kept only in memory for the session: a [The Odds API](https://the-odds-api.com) key for live moneylines, and a Telegram bot token and chat ID for pushing picks.
+Then install the dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Start the app
+
+```bash
+python -m server
+```
+
+The browser opens http://127.0.0.1:8000. Options: `--port 8010` if 8000 is taken, `--no-browser` to skip opening a tab. Stop it with `Ctrl+C`.
+
+### 4. Build the model (first run, then about once a week)
+
+1. Open the **Model** page.
+2. Tick **Force full rebuild** and press **Train**.
+3. Wait for the progress bar (a few minutes). The app downloads the 2023-24 to 2026-27 seasons, replays the team ratings through every game into `team_strength.json`, and trains the reference models.
+
+Until this has run once, predictions fall back to plain Elo. Seasons roll forward automatically each October.
+
+### 5. Predict a game
+
+Open **Game**, pick the home and away teams, and the app shows the win probability, expected margin (spread), total, the team ratings with their uncertainty, injuries from the ESPN report, and a breakdown of the probability into rating gap, home court, back-to-back and injuries. Enter bookmaker moneylines (or set an Odds API key) to see the edge and a capped Kelly stake.
+
+To keep the ratings current during the season, press **Grade new games** on the Model page after games finish: it grades the new results and rebuilds the ratings.
+
+### 6. Optional keys
+
+On the **Settings** page, or in a `.env` file copied from `.env.example`:
+
+| Key | What for |
+|---|---|
+| `ODDS_API_KEY` | Live moneylines from [The Odds API](https://the-odds-api.com) (free tier: 500 requests a month). Without it, ESPN odds are used when available. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Send picks to a Telegram chat. |
+
+Keys stay in `.env` on your machine (gitignored); the app never sends them to the browser.
+
+### 7. Try it offline (demo mode)
+
+Replay any date from 2010-11 to 2023-24 with real historical games, no network needed:
+
+```bash
+git clone --depth 1 https://github.com/NocturneBear/NBA-Data-2010-2024 ../nba-data-2010-2024
+NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 python -m server
+```
+
+On Windows PowerShell set the variables first: `$env:NBA_HISTORY_DIR="..\nba-data-2010-2024"; $env:NBA_QUANT_DEMO_DATE="2024-03-15"`.
+
+### The previous interface
+
+The Streamlit app still works and uses the same model: `streamlit run nba_app.py`. The Slate, Accuracy, Bets and Ratings pages of the web app are still being built, so use Streamlit for scanning a full day, range backtests and the ROI log until then.
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Train fails with a timeout on stats.nba.com | Turn off VPN / proxy and retry; NBA.com rate-limits, so wait a minute between attempts. |
+| `Address already in use` | `python -m server --port 8010` |
+| Predictions say "Elo only" | Run **Train** once (step 4). |
+| Injuries show "unavailable" | ESPN's feed was unreachable; the prediction is made without injuries and says so. |
+| `ModuleNotFoundError` | The virtual environment is not active; activate it (step 2) and reinstall. |
 
 ## Project layout
 
 ```
-nba_app.py               Streamlit interface
-config.py                constants, feature list, season roll-over
+server/                  FastAPI web app (python -m server): API, background jobs, demo mode
+web/                     HTML pages, CSS, JS; libraries vendored for offline use
 engine/
-  models.py              dataset builder, training, calibration, blend layer
-  features.py            live pre-game features for one team
-  simulate.py            correlated Monte Carlo and quarter projections
+  team_strength.py       Kalman-Elo team ratings → margin → win probability (current model)
+  models.py              dataset builder, prediction entry point, v5 reference model
+  features.py            live pre-game team form
+  simulate.py            correlated Monte Carlo for totals and score ranges
   betting.py             odds conversion and Kelly sizing
 data/
-  elo.py                 margin-of-victory Elo
   injuries.py            ESPN injury report and player impact
-  autobacktest.py        blind back-test of newly finished games
-  odds.py, schedule.py   bookmaker odds, schedule and scores
-  cache.py               SQLite cache for API responses
+  autobacktest.py        grades finished games and refreshes the ratings
+  elo.py, odds.py, schedule.py, cache.py
 research/
   benchmark.py           walk-forward benchmark on 2010-24 games
-  variants/              experimental models scored by the benchmark
+  variants/              every model tried, with its benchmark code
 tests/                   offline tests (pytest)
-player_impact_updater.py builds player_impact.json from season stats
-optuna_tuner.py          optional hyperparameter search
+nba_app.py               previous Streamlit interface
+config.py                constants and season roll-over
 ```
 
 ## Development
 
 ```bash
-pip install pytest
+pip install pytest httpx
 python -m pytest -q
 ```
 

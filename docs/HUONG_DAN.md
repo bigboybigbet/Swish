@@ -1,0 +1,144 @@
+# Hướng dẫn sử dụng NBA Quant
+
+NBA Quant dự đoán từng trận NBA trước giờ bóng lăn: xác suất thắng của đội nhà, chênh lệch điểm kỳ vọng (spread) và tổng điểm (total). App chạy trên máy bạn dưới dạng web app, mở bằng trình duyệt.
+
+## Model hiện tại
+
+Model v6 dùng **Kalman-Elo**:
+
+- Mỗi đội có một rating tính bằng điểm (mạnh hơn đội trung bình bao nhiêu điểm), kèm độ bất định.
+- Sau mỗi trận, rating thay đổi nhiều hay ít tuỳ model đang chắc chắn về đội đó tới đâu. Đầu mùa hay sau quãng nghỉ dài, rating thay đổi nhanh. Giữa mùa, rating thay đổi chậm.
+- Sang mùa mới, rating bị kéo 20% về mức trung bình, vì đội hình có xáo trộn.
+- Trận thứ hai trong hai đêm liên tiếp (back-to-back) bị trừ 1 điểm.
+- Mỗi cầu thủ chấn thương bị trừ điểm theo mức độ quan trọng và tình trạng (out, doubtful, questionable, day-to-day).
+
+Kết quả kiểm tra trên 8.874 trận thật từ mùa 2017-18 đến 2023-24. Model chỉ được thấy các trận đã đá trước trận cần đoán.
+
+| Model | Log loss (thấp hơn là tốt hơn) | Đoán đúng |
+|---|---:|---:|
+| **v6 Kalman-Elo (hiện tại)** | **0.628** | **64,5%** |
+| Elo cũ | 0.634 | 64,0% |
+| v5 XGBoost (trước đây) | 0.652 | 62,6% |
+
+## Cài đặt (làm một lần)
+
+**Bạn cần có:**
+- Python 3.11 trở lên. Kiểm tra bằng lệnh `python --version`.
+- Git.
+- Mạng Internet bình thường. NBA.com hay chặn VPN và máy chủ cloud, nên nếu tải dữ liệu bị timeout thì hãy tắt VPN.
+
+**Các bước:**
+
+```bash
+git clone https://github.com/bigboybigbet/nba_app_quant.git
+cd nba_app_quant
+python -m venv .venv
+```
+
+Kích hoạt môi trường ảo:
+
+| Hệ điều hành | Lệnh |
+|---|---|
+| Windows PowerShell | `.venv\Scripts\Activate.ps1` |
+| Windows cmd | `.venv\Scripts\activate.bat` |
+| macOS / Linux | `source .venv/bin/activate` |
+
+Nếu PowerShell báo lỗi không cho chạy script, chạy lệnh này một lần rồi kích hoạt lại:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Cài thư viện:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Chạy app
+
+```bash
+python -m server
+```
+
+Trình duyệt sẽ tự mở http://127.0.0.1:8000. Bấm `Ctrl+C` trong cửa sổ terminal để tắt app.
+
+Mỗi lần mở app sau này, bạn chỉ cần vào thư mục dự án, kích hoạt môi trường ảo, rồi chạy `python -m server`.
+
+## Lần đầu: dựng model
+
+1. Vào trang **Model**.
+2. Tick ô **Force full rebuild** rồi bấm **Train**.
+3. Đợi thanh tiến độ chạy xong, mất vài phút.
+
+Trong lúc này app tải các mùa 2023-24 đến 2026-27, tính rating cho cả 30 đội qua từng trận, và lưu vào file `team_strength.json`. Nếu chưa Train lần nào, app chỉ dự đoán bằng Elo đơn giản và hiện nhãn "Elo only". Sau khi Train xong, nhãn sẽ đổi thành "Kalman-Elo v6".
+
+## Dùng hằng ngày
+
+**Dự đoán một trận:** vào trang **Game** và chọn đội nhà, đội khách. App hiển thị:
+- xác suất thắng và spread;
+- tổng điểm kèm khoảng dao động;
+- rating của hai đội kèm độ bất định;
+- danh sách chấn thương lấy từ ESPN;
+- bảng tách xác suất thành từng phần: chênh lệch rating, lợi thế sân nhà, back-to-back, chấn thương.
+
+Nếu bạn nhập tỷ lệ cược (moneyline) của nhà cái, app tính thêm lợi thế (edge) và mức cược Kelly đã giới hạn.
+
+**Cập nhật rating sau khi có kết quả mới:** vào trang **Model** và bấm **Grade new games**. App sẽ chấm các trận vừa đá, rồi tính lại rating từ đầu, nên không trận nào bị cộng hai lần.
+
+**Train lại:** khoảng mỗi tuần một lần, hoặc khi thấy dự đoán có vẻ lỗi thời.
+
+Mùa giải tự chuyển vào tháng 10 hằng năm, bạn không cần sửa gì.
+
+## Khoá API (không bắt buộc)
+
+Bạn nhập khoá ở trang **Settings**, hoặc chép `.env.example` thành `.env` rồi điền vào đó.
+
+| Khoá | Dùng để làm gì |
+|---|---|
+| `ODDS_API_KEY` | Lấy tỷ lệ cược trực tiếp từ [The Odds API](https://the-odds-api.com). Gói miễn phí có 500 lượt mỗi tháng. Không có khoá thì app dùng tỷ lệ của ESPN nếu có. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Gửi kèo qua Telegram. |
+
+Khoá chỉ nằm trong file `.env` trên máy bạn. File này không bao giờ được đưa lên Git, và app không gửi khoá ra trình duyệt.
+
+## Chạy thử không cần mạng (chế độ demo)
+
+Chế độ demo phát lại một ngày bất kỳ từ mùa 2010-11 đến 2023-24 bằng dữ liệu thật:
+
+```bash
+git clone --depth 1 https://github.com/NocturneBear/NBA-Data-2010-2024 ../nba-data-2010-2024
+```
+
+Trên Windows PowerShell:
+
+```powershell
+$env:NBA_HISTORY_DIR="..\nba-data-2010-2024"; $env:NBA_QUANT_DEMO_DATE="2024-03-15"; python -m server
+```
+
+Trên macOS / Linux:
+
+```bash
+NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 python -m server
+```
+
+## Giao diện cũ (Streamlit)
+
+Các trang Slate (quét cả ngày), Accuracy (backtest), Bets (ROI) và Ratings của web app chưa làm xong. Trong lúc chờ, bạn vẫn dùng được app cũ, chạy cùng model mới:
+
+```bash
+streamlit run nba_app.py
+```
+
+## Gặp lỗi thì làm gì
+
+| Lỗi | Cách xử lý |
+|---|---|
+| Train báo timeout khi kết nối stats.nba.com | Tắt VPN hoặc proxy rồi thử lại. NBA.com giới hạn số lượt gọi, nên hãy đợi khoảng 1 phút giữa các lần thử. |
+| `Address already in use` | Cổng 8000 đang bận. Chạy `python -m server --port 8010` rồi mở http://127.0.0.1:8010 |
+| Dự đoán hiện "Elo only" | Chưa Train. Làm theo mục "Lần đầu: dựng model". |
+| Chấn thương hiện "unavailable" | Không lấy được dữ liệu từ ESPN. App vẫn dự đoán nhưng không tính chấn thương, và có ghi chú điều này. |
+| `ModuleNotFoundError` | Môi trường ảo chưa được kích hoạt. Kích hoạt lại rồi chạy lại `pip install -r requirements.txt`. |
+
+## Lưu ý
+
+Dự đoán là xác suất, không phải điều chắc chắn. Đây không phải lời khuyên cá cược. Nếu cược, chỉ dùng số tiền bạn chấp nhận mất.

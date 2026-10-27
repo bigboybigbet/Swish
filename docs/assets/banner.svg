@@ -23,5 +23,5 @@
   </g>
   <text x="60" y="118" fill="#ffffff" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="64" font-weight="700">NBA Quant</text>
   <text x="62" y="162" fill="#cbd5e1" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="24">Probabilistic NBA game forecasts: win probability, spread and total</text>
-  <text x="62" y="198" fill="#94a3b8" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18">Elo · team form · calibrated gradient boosting · walk-forward tested on 14 seasons</text>
+  <text x="62" y="198" fill="#94a3b8" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18">Kalman-Elo team ratings · injury-aware · walk-forward tested on 14 seasons</text>
 </svg>
