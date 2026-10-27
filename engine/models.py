@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 import pandas as pd
-from joblib import dump, load
+from joblib import load
 from nba_api.stats.endpoints import leaguegamefinder
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import accuracy_score, log_loss
@@ -19,8 +19,9 @@ except ImportError:                    # older releases still accept cv="prefit"
     FrozenEstimator = None
 
 from config import (BLEND_FILE, DATASET_FILE, ELO_DEFAULT, FEATURE_COLS,
-                    MODEL_FILE, OPTUNA_PARAMS_FILE, RECENCY_HALFLIFE_DAYS,
+                    MODEL_FILE, N_JOBS, OPTUNA_PARAMS_FILE, RECENCY_HALFLIFE_DAYS,
                     TRAIN_SEASONS)
+from data.atomic import atomic_joblib_dump, atomic_path, atomic_write_json
 from data.elo import save_elo, update_elo_game
 from data.injuries import apply_injury_adjustment, calc_strength_factor
 from engine.simulate import run_monte_carlo
@@ -91,13 +92,12 @@ class BlendCalibrator:
     # ── persistence ───────────────────────────────────────────────────────
 
     def save(self, path: str = None):
-        with open(path or BLEND_FILE, "w") as f:
-            json.dump({
-                "weights":   self.weights.tolist(),
-                "bias":      self.bias,
-                "n_updates": self.n_updates,
-                "lr":        self.lr,
-            }, f, indent=2)
+        atomic_write_json(path or BLEND_FILE, {
+            "weights":   self.weights.tolist(),
+            "bias":      self.bias,
+            "n_updates": self.n_updates,
+            "lr":        self.lr,
+        }, indent=2)
 
     @classmethod
     def load(cls, path: str = None) -> "BlendCalibrator":
@@ -133,6 +133,12 @@ def get_calibrator() -> BlendCalibrator:
         _calib_cache = BlendCalibrator.load()
         _calib_mtime = mtime
     return _calib_cache
+
+
+def load_model(path: str = None):
+    """Load the saved model as-is (no refit); None if the file doesn't exist."""
+    p = path or MODEL_FILE
+    return load(p) if os.path.exists(p) else None
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -191,11 +197,13 @@ def _search_params(X: pd.DataFrame, y: pd.Series, report) -> dict:
     """
     report("Running RandomizedSearchCV (20 candidates × 3 time-series folds)…")
     tscv   = TimeSeriesSplit(n_splits=3)
-    base   = XGBClassifier(eval_metric="logloss", random_state=42, n_jobs=-1)
+    # Parallelism comes from the search (N_JOBS fits at once, one thread each);
+    # n_jobs=-1 on both levels oversubscribed the CPU.
+    base   = XGBClassifier(eval_metric="logloss", random_state=42, n_jobs=1)
     search = RandomizedSearchCV(
         base, _PARAM_GRID,
         n_iter=20, scoring="neg_log_loss",
-        cv=tscv, n_jobs=-1, random_state=42, verbose=0,
+        cv=tscv, n_jobs=N_JOBS, random_state=42, verbose=0,
         refit=True,
     )
     search.fit(X, y)
@@ -254,7 +262,8 @@ def build_master_dataset(seasons=None, status_cb=None):
     out, elo = build_matchup_dataset(raw, report)
     save_elo(elo)
     report("Elo ratings replayed chronologically and saved (live ratings updated)")
-    out.to_csv(DATASET_FILE, index=False)
+    with atomic_path(DATASET_FILE) as tmp:
+        out.to_csv(tmp, index=False)
     report(f"Dataset built: {len(out):,} matchup rows saved to {DATASET_FILE}")
     return out
 
@@ -406,7 +415,7 @@ def train_model(force_rebuild: bool = False, use_optuna: bool = False,
         return None, 0, None
 
     model, metrics = fit_matchup_model(df, use_optuna=use_optuna, report=report)
-    dump(model, MODEL_FILE)
+    atomic_joblib_dump(model, MODEL_FILE)
     report(
         f"Model saved — val_acc={metrics['val_acc']:.3f} "
         f"val_loss={metrics['val_loss']:.4f} "
@@ -457,7 +466,7 @@ def fit_matchup_model(df: pd.DataFrame, use_optuna: bool = False,
     # Train with exponential recency weighting
     report("Training XGBoost with recency-weighted samples…")
     sw  = _recency_weights(df.iloc[:tr_end])
-    xgb = XGBClassifier(**clean_params, eval_metric="logloss", random_state=42, n_jobs=-1)
+    xgb = XGBClassifier(**clean_params, eval_metric="logloss", random_state=42, n_jobs=N_JOBS)
     xgb.fit(X_tr, y_tr, sample_weight=sw, verbose=False)
 
     # Calibrate on the cal split — sigmoid (Platt scaling) only fits 2
