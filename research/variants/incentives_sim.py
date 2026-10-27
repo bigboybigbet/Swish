@@ -34,8 +34,8 @@ from scipy.special import ndtr
 from research.benchmark import CACHE_DIR
 from research.variants import adj_ratings
 from research.variants.incentives_standings import (
-    IS_EAST, TEAM_IX, TEAMS, conference_ranks, has_play_in, lottery_odds,
-    postseason_weight, regular_season_games)
+    IS_EAST, SUSPENSION, TEAM_IX, TEAMS, conference_ranks, has_play_in,
+    lottery_odds, postseason_weight, regular_season_games)
 
 MC = dict(
     n_sims=2000,
@@ -45,14 +45,15 @@ MC = dict(
     seed=2024,
 )
 VERSION = 1
-SUSPENSION = pd.Timestamp("2020-03-12")       # first day without games, 2019-20
 SERIES_PATTERN = (1, 1, 0, 0, 1, 0, 1)        # 1 = better seed at home
 
 
 # ── ratings ───────────────────────────────────────────────────────────────────
 
-def _ridge_snapshots(games: pd.DataFrame, halflife, lam, carry, shrink, cap):
-    """Margin-ridge coefficients before each game-day (adj_ratings logic)."""
+def _ridge_snapshots(games: pd.DataFrame, halflife, lam, carry, shrink, cap,
+                     until=None, until_season=None):
+    """Margin-ridge coefficients before each game-day (adj_ratings logic).
+    With `until` (a date after the last game), also the state on that day."""
     teams = sorted(set(games["H"]) | set(games["A"]))
     tix = {t: i for i, t in enumerate(teams)}
     n = len(teams)
@@ -76,16 +77,28 @@ def _ridge_snapshots(games: pd.DataFrame, halflife, lam, carry, shrink, cap):
         snaps[pd.Timestamp(dates[s])] = (r, b[n])
         for k in range(s, e):
             mm.add([H[k], A[k], n], [1, -1, 1], margin[k])
+    if until is not None:
+        until = pd.Timestamp(until)
+        if until_season != seasons[-1]:
+            mm.new_season(slice(0, n), carry, shrink)
+        else:
+            mm.decay(0.5 ** ((until - pd.Timestamp(dates[-1])).days / halflife))
+        b = mm.solve()
+        r = np.zeros(30)
+        r[order] = b[:n]
+        snaps[until] = (r, b[n])
     return snaps
 
 
-def daily_ratings(raw: pd.DataFrame) -> dict:
-    """GAME_DATE -> (ratings[30] in TEAMS order, home edge), pre-game."""
+def daily_ratings(raw: pd.DataFrame, until=None, until_season=None) -> dict:
+    """GAME_DATE -> (ratings[30] in TEAMS order, home edge), pre-game.
+    `until`: also the state on a later date with no logged games (live)."""
     games = adj_ratings.game_table(raw)
     p = adj_ratings.PARAMS
-    team = _ridge_snapshots(games, **p)
+    team = _ridge_snapshots(games, **p, until=until, until_season=until_season)
     home = _ridge_snapshots(games, **{**p, "halflife": adj_ratings.HOME_HALFLIFE,
-                                      "carry": 1.0, "shrink": 1.0})
+                                      "carry": 1.0, "shrink": 1.0},
+                            until=until, until_season=until_season)
     return {d: (team[d][0], home[d][1]) for d in team}
 
 
@@ -196,12 +209,71 @@ def _clinch_flags(W, L, G, season):
 GOALS = ["POST", "TOP1", "TOP4", "TOP6", "TOP8", "TOP10", "BOT3", "ODDS"]
 
 
+def simulate_day(W, L, G, rem_h, rem_a, n_today, r, home, season, rng, p,
+                 phantom=None, bracket=False) -> list:
+    """Rest-of-season MC on one game-day.
+
+    W, L: wins / losses per team (TEAMS order) from games before today;
+    G: games per team in the full schedule; rem_h, rem_a: team indices of
+    every remaining fixture (today's n_today games first); r, home: pre-game
+    ratings and home edge; phantom: extra games per team vs a neutral average
+    opponent.  Returns one dict of features per today's game, keys suffixed
+    _H / _A.  This is also the live entry point (see live notes in
+    incentives.py)."""
+    S, sigma, tau = p["n_sims"], p["sigma"], p["tau"]
+    phantom = np.zeros(30) if phantom is None else phantom
+    eta = rng.normal(0, tau, (S, 30))
+    x = (r[rem_h] - r[rem_a] + home)[None, :] + eta[:, rem_h] - eta[:, rem_a]
+    O = (rng.random(x.shape) < ndtr(x / sigma)).astype(np.float32)
+    IH = np.zeros((len(rem_h), 30), np.float32)
+    IA = np.zeros((len(rem_h), 30), np.float32)
+    IH[np.arange(len(rem_h)), rem_h] = 1
+    IA[np.arange(len(rem_h)), rem_a] = 1
+    Wf = W[None, :] + O @ IH + (1 - O) @ IA
+    if phantom.any():
+        Wf = Wf + rng.binomial(phantom.astype(int)[None, :].repeat(S, 0),
+                               ndtr((r[None, :] + eta) / sigma))
+    tb = rng.random((S, 30))
+    base = _goals(Wf, G, tb, season)
+    flags = _clinch_flags(W, L, G, season)
+    seed_dist = np.stack([(base["seed"] == k).mean(0) for k in range(1, 16)])
+    lock = seed_dist.max(0) >= 0.99
+    SM = series_matrix(r, home, sigma) if bracket else None
+    bval = bracket_value(base["seed"], SM, season) if bracket else None
+
+    out = []
+    for j in range(n_today):
+        h, a = rem_h[j], rem_a[j]
+        o = O[:, j]
+        Wh = Wf.copy(); Wh[:, h] += 1 - o; Wh[:, a] -= 1 - o
+        Wa = Wf.copy(); Wa[:, h] -= o;     Wa[:, a] += o
+        gh, ga = _goals(Wh, G, tb, season), _goals(Wa, G, tb, season)
+        if bracket:
+            bh, ba = bracket_value(gh["seed"], SM, season), bracket_value(ga["seed"], SM, season)
+        row = {}
+        for side, t, win, lose in (("H", h, gh, ga), ("A", a, ga, gh)):
+            for k in GOALS:
+                row[f"P_{k}_{side}"] = base[k][:, t].mean()
+                row[f"LEV_{k}_{side}"] = win[k][:, t].mean() - lose[k][:, t].mean()
+            row[f"E_SEED_{side}"] = base["seed"][:, t].mean()
+            row[f"LEV_SEED_{side}"] = lose["seed"][:, t].mean() - win["seed"][:, t].mean()
+            row[f"SEED_LOCK_{side}"] = float(lock[t])
+            for f, v in flags.items():
+                row[f"{f}_{side}"] = float(v[t])
+            if bracket:
+                bw, bl = (bh, ba) if side == "H" else (ba, bh)
+                row[f"BVAL_{side}"] = bval[:, t].mean()
+                row[f"BVAL_W_{side}"] = bw[:, t].mean()
+                row[f"BVAL_L_{side}"] = bl[:, t].mean()
+        out.append(row)
+    return out
+
+
 def simulate_season(g: pd.DataFrame, ratings: dict, p: dict) -> pd.DataFrame:
     """Incentive features for every game of one regular season (rows of
-    regular_season_games for that season)."""
+    regular_season_games for that season), replayed day by day."""
     season = g["SEASON"].iloc[0]
     rng = np.random.default_rng(p["seed"] + int(season[:4]))
-    S, sigma, tau = p["n_sims"], p["sigma"], p["tau"]
     HI, AI = g["HI"].values, g["AI"].values
     res = g["RESULT"].values
     dates = g["GAME_DATE"].values
@@ -212,70 +284,24 @@ def simulate_season(g: pd.DataFrame, ratings: dict, p: dict) -> pd.DataFrame:
 
     W = np.zeros(30)
     L = np.zeros(30)
-    cols = {}
-    def put(name, i, side, v):
-        cols.setdefault(f"{name}_{side}", np.full(len(g), np.nan))[i] = v
-
+    rows = []
     starts = np.r_[0, np.flatnonzero(dates[1:] != dates[:-1]) + 1, len(g)]
     for s, e in zip(starts[:-1], starts[1:]):
         day = pd.Timestamp(dates[s])
         r, home = ratings[day]
-        phantom = np.zeros(30)
+        phantom = None
         G = total.copy()
+        rem_ix = np.arange(s, len(g))
         if season == "2019-20" and day < SUSPENSION:
             phantom = 82 - pre_susp
             G = np.full(30, 82.0)
-            rem_ix = np.arange(s, len(g))[dates[s:] < SUSPENSION]
-        else:
-            rem_ix = np.arange(s, len(g))
-        rh, ra = HI[rem_ix], AI[rem_ix]
-
-        eta = rng.normal(0, tau, (S, 30))
-        x = (r[rh] - r[ra] + home)[None, :] + eta[:, rh] - eta[:, ra]
-        O = (rng.random(x.shape) < ndtr(x / sigma)).astype(np.float32)
-        IH = np.zeros((len(rem_ix), 30), np.float32)
-        IA = np.zeros((len(rem_ix), 30), np.float32)
-        IH[np.arange(len(rem_ix)), rh] = 1
-        IA[np.arange(len(rem_ix)), ra] = 1
-        Wf = W[None, :] + O @ IH + (1 - O) @ IA
-        if phantom.any():
-            Wf = Wf + rng.binomial(phantom.astype(int)[None, :].repeat(S, 0),
-                                   ndtr((r[None, :] + eta) / sigma))
-        tb = rng.random((S, 30))
-        base = _goals(Wf, G, tb, season)
-        flags = _clinch_flags(W, L, G, season)
-        seed_dist = np.stack([(base["seed"] == k).mean(0) for k in range(1, 16)])
-        lock = seed_dist.max(0) >= 0.99
-        brk = (last_day - day).days < p["bracket_days"]
-        SM = series_matrix(r, home, sigma) if brk else None
-        bval = bracket_value(base["seed"], SM, season) if brk else None
-
-        for j, i in enumerate(range(s, e)):            # today's games: rem_ix[j] == i
-            h, a = HI[i], AI[i]
-            o = O[:, j]
-            Wh = Wf.copy(); Wh[:, h] += 1 - o; Wh[:, a] -= 1 - o
-            Wa = Wf.copy(); Wa[:, h] -= o;     Wa[:, a] += o
-            gh, ga = _goals(Wh, G, tb, season), _goals(Wa, G, tb, season)
-            if brk:
-                bh, ba = bracket_value(gh["seed"], SM, season), bracket_value(ga["seed"], SM, season)
-            for side, t, win, lose in (("H", h, gh, ga), ("A", a, ga, gh)):
-                for k in GOALS:
-                    put("P_" + k, i, side, base[k][:, t].mean())
-                    put("LEV_" + k, i, side, win[k][:, t].mean() - lose[k][:, t].mean())
-                put("E_SEED", i, side, base["seed"][:, t].mean())
-                put("LEV_SEED", i, side, lose["seed"][:, t].mean() - win["seed"][:, t].mean())
-                put("SEED_LOCK", i, side, float(lock[t]))
-                for f, v in flags.items():
-                    put(f, i, side, float(v[t]))
-                if brk:
-                    bw, bl = (bh, ba) if side == "H" else (ba, bh)
-                    put("BVAL", i, side, bval[:, t].mean())
-                    put("BVAL_W", i, side, bw[:, t].mean())
-                    put("BVAL_L", i, side, bl[:, t].mean())
+            rem_ix = rem_ix[dates[s:] < SUSPENSION]
+        rows += simulate_day(W, L, G, HI[rem_ix], AI[rem_ix], e - s, r, home, season,
+                             rng, p, phantom, bracket=(last_day - day).days < p["bracket_days"])
         np.add.at(W, HI[s:e], res[s:e]); np.add.at(L, HI[s:e], 1 - res[s:e])
         np.add.at(W, AI[s:e], 1 - res[s:e]); np.add.at(L, AI[s:e], res[s:e])
 
-    out = pd.DataFrame(cols)
+    out = pd.DataFrame(rows)
     out.insert(0, "GAME_ID", g["GAME_ID"].values)
     return out
 
@@ -300,3 +326,46 @@ def season_features(raw: pd.DataFrame, seasons=None, **params) -> pd.DataFrame:
                             ratings, p).to_parquet(path, index=False)
         parts.append(pd.read_parquet(path))
     return pd.concat(parts, ignore_index=True)
+
+
+# ── live ──────────────────────────────────────────────────────────────────────
+
+def live_day(logs: pd.DataFrame, schedule: pd.DataFrame, today, season: str,
+             seed: int = 0, **params) -> pd.DataFrame:
+    """Incentive features for today's games, for live use.
+
+    logs: leaguegamefinder team logs of every game played BEFORE today (this
+    season and the previous ones, for the ratings); schedule: this season's
+    regular-season fixtures (GAME_ID, GAME_DATE, H, A as TEAM_IDs), e.g. from
+    nba_api scheduleleaguev2 or ESPN.  Results of future games are never
+    needed, only their fixtures."""
+    p = {**MC, **params}
+    today = pd.Timestamp(today).normalize()
+    logs = logs[pd.to_datetime(logs["GAME_DATE"]).dt.normalize() < today]
+    r, home = daily_ratings(logs, until=today, until_season=season)[today]
+    played = regular_season_games(logs)
+    played = played[played["SEASON"] == season]
+    W = (np.bincount(played["HI"], played["RESULT"], 30)
+         + np.bincount(played["AI"], 1 - played["RESULT"], 30))
+    L = (np.bincount(played["HI"], 1 - played["RESULT"], 30)
+         + np.bincount(played["AI"], played["RESULT"], 30))
+    sch = schedule.copy()
+    sch["GAME_DATE"] = pd.to_datetime(sch["GAME_DATE"]).dt.normalize()
+    sch["HI"], sch["AI"] = sch["H"].map(TEAM_IX), sch["A"].map(TEAM_IX)
+    G = (np.bincount(sch["HI"], minlength=30) + np.bincount(sch["AI"], minlength=30)).astype(float)
+    rem = sch[sch["GAME_DATE"] >= today].sort_values(["GAME_DATE", "GAME_ID"])
+    rem = rem[~rem["GAME_ID"].isin(played["GAME_ID"])]
+    n_today = int((rem["GAME_DATE"] == today).sum())
+    if n_today == 0:
+        return pd.DataFrame()
+    rng = np.random.default_rng(p["seed"] + seed)
+    last_day = sch["GAME_DATE"].max()
+    rows = simulate_day(W, L, G, rem["HI"].values, rem["AI"].values, n_today, r, home,
+                        season, rng, p, bracket=(last_day - today).days < p["bracket_days"])
+    out = pd.DataFrame(rows)
+    out.insert(0, "GAME_ID", rem["GAME_ID"].values[:n_today])
+    for side, col in (("H", "HI"), ("A", "AI")):
+        t = rem[col].values[:n_today]
+        out[f"W_{side}"], out[f"L_{side}"] = W[t], L[t]
+        out[f"GREM_{side}"] = G[t] - W[t] - L[t]
+    return out

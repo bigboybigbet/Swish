@@ -23,10 +23,12 @@ MANIP_DAYS = 5          # seeding manipulation: last N days of the season
 MANIP_GAIN = 0.02       # bracket value (exp. series wins) gained by losing
 
 
-def model_sets(incentive=None):
+def model_sets(incentive=None, full=None):
     i = incentive or inc.INCENTIVE
+    f = full or inc.FULL_INCENTIVE
     return {"base": inc.BASE, "base+inc": inc.BASE + i,
-            "base+who": inc.BASE + inc.WHO, "base+who+inc": inc.BASE + inc.WHO + i}
+            "base+who": inc.BASE + inc.WHO, "base+who+inc": inc.BASE + inc.WHO + i,
+            "base+full": inc.BASE + f, "base+who+full": inc.BASE + inc.WHO + f}
 
 
 def predict_all(df, seasons, sets, c=inc.C):
@@ -68,7 +70,8 @@ def compare(t, mask, a, b):
 def subset_table(t):
     rows = []
     for name, m in subset_masks(t).items():
-        for a, b in (("base", "base+inc"), ("base+who", "base+who+inc"), ("base", "base+who")):
+        for a, b in (("base", "base+inc"), ("base+who", "base+who+inc"), ("base", "base+who"),
+                     ("base", "base+full"), ("base+who", "base+who+full")):
             r = compare(t, m, a, b)
             rows.append({"subset": name, "pair": f"{b} vs {a}", "n": r["n"],
                          "ll_a": r[f"ll_{a}"], "ll_b": r[f"ll_{b}"],
@@ -117,15 +120,19 @@ def manipulation_table(t):
     rows = side_rows(t[t["IS_RS"] == 1])
     last_date = rows["SEASON"].map(rows.groupby("SEASON")["GAME_DATE"].max())
     lastn = rows["GAME_DATE"] > last_date - pd.Timedelta(days=MANIP_DAYS)
-    gain = rows["BVAL_L"] - rows["BVAL_W"]
+    gain = rows["BVAL_L"] - rows["BVAL_W"]          # expected R1+R2 series wins
+    sure = rows["P_POST"] >= 0.99
     checks = [
         (lastn, f"all team-games, last {MANIP_DAYS} days"),
-        (lastn & (gain > MANIP_GAIN), f"losing improves bracket value by > {MANIP_GAIN}"),
-        (lastn & (gain > MANIP_GAIN) & (rows["P_POST"] >= 0.99), "  ... and playoff spot sure"),
-        (lastn & (gain > 0.05), "losing improves bracket value by > 0.05"),
-        (lastn & (gain < -MANIP_GAIN), f"winning improves bracket value by > {MANIP_GAIN}"),
-        ((rows["IS_RS"] == 1) & (rows["TANK"] > 1.0) & (rows["GREM"] <= 20),
+        (lastn & (gain > 0.005) & sure, "losing improves bracket value > 0.005, spot sure"),
+        (lastn & (gain > MANIP_GAIN) & sure, f"losing improves bracket value > {MANIP_GAIN}, spot sure"),
+        (lastn & (gain < -MANIP_GAIN), f"winning improves bracket value > {MANIP_GAIN}"),
+        ((rows["TANK"] > 1.0) & (rows["GREM"] <= 20),
          "tank incentive > 1pp #1-pick odds, last 20 games"),
+        ((rows["TANK"] > 1.0) & (rows["GREM"] <= 20) & (rows["SEASON"] < "2018-19"),
+         "  ... old lottery odds (to 2017-18)"),
+        ((rows["TANK"] > 1.0) & (rows["GREM"] <= 20) & (rows["SEASON"] >= "2018-19"),
+         "  ... flattened odds (2018-19 on)"),
         ((rows["REST"] == 1), "REST flag (late, playoff sure, nothing at stake)"),
         ((rows["GREM"] <= 20) & (rows["STAKE"] > 0.15), "stake > 0.15, last 20 games"),
     ]

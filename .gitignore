@@ -24,3 +24,8 @@ __pycache__/
 .arena/
 vama_pdfs/
 *.xlsx
+
+# Web app state (python -m server)
+runs/
+settings.json
+model_metrics.json

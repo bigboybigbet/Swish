@@ -1,0 +1,3 @@
+# Vendored frontend files are verified byte-for-byte against web/vendor.lock.json (sha384):
+# never convert their line endings.
+web/static/vendor/** -text

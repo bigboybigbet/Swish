@@ -1,0 +1,235 @@
+{%- from "_macros.html" import PAGES, page_label -%}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}{{ page_label(page) }}{% endblock %} · NBA Quant</title>
+  <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/vendor/@tabler/core@1.6.1/tabler.min.css">
+  <link rel="stylesheet" href="/static/vendor/@tabler/icons-webfont@3.49.0/tabler-icons.min.css">
+  <link rel="stylesheet" href="/static/vendor/tabulator-tables@6.6.1/tabulator_bootstrap5.min.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/@tabler/core@1.6.1/tabler-theme.min.js"></script>
+  <script defer src="/static/vendor/@tabler/core@1.6.1/tabler.min.js"></script>
+  <script type="importmap">{"imports":{
+   "alpinejs":"/static/vendor/alpinejs@3.17.4/module.esm.min.js",
+   "@alpinejs/persist":"/static/vendor/@alpinejs/persist@3.17.4/module.esm.min.js",
+   "echarts":"/static/vendor/echarts@6.1.0/echarts.esm.min.mjs",
+   "tabulator-tables":"/static/vendor/tabulator-tables@6.6.1/tabulator_esm.min.mjs"}}</script>
+  <script type="module" src="/static/js/main.js"></script>
+  {#- CDN fallback (needs internet). The vendored copies above are the default;
+      the sha384 values are the same as in web/vendor.lock.json.
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.6.1/dist/css/tabler.min.css" integrity="sha384-tT2UAGE9hxG/p5d0iGIvZ/s8El3nWWG3tfG02i8iOY5Pbf8cZZRVmcrrVs+JG5Vw" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.49.0/dist/tabler-icons.min.css" integrity="sha384-IcAOG/1tqv9Qnam+j3mZYPAFcNQMnQpMcafc8Nsvd44AUeTCzhUzdQiJkrROmqW6" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.6.1/dist/css/tabulator_bootstrap5.min.css" integrity="sha384-G3nHFKuWvqfHxFfuwr4pyZK3g3pTse3g3RtcK/gJ7picizkfM3KyRHxBXqcgRGzh" crossorigin="anonymous">
+  <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.6.1/dist/js/tabler-theme.min.js" integrity="sha384-gPM8vc3koNjMZtzPmhqasm5L6/Zak4DcWmRrPt4GZJBKSEKQfwyFIehZzq2TH1AZ" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@tabler/core@1.6.1/dist/js/tabler.min.js" integrity="sha384-1yCHfhyU8+V33urXkAlLLpNYd9jdzXkxdafCg0+auIIEtYFnOuM/DwJQgk5sXY98" crossorigin="anonymous"></script>
+  <script type="importmap">{"imports":{
+   "alpinejs":"https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/module.esm.min.js",
+   "@alpinejs/persist":"https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.17.4/dist/module.esm.min.js",
+   "echarts":"https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.esm.min.mjs",
+   "tabulator-tables":"https://cdn.jsdelivr.net/npm/tabulator-tables@6.6.1/dist/js/tabulator_esm.min.mjs"},
+   "integrity":{
+   "https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/module.esm.min.js":"sha384-1Ke8PPO06VpcxfoPiRe4Jjq31uQTfwsebhSRsFKmzNNFeZY91GCD3tFaalnLaU30",
+   "https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.17.4/dist/module.esm.min.js":"sha384-GVzTX289e7FrOjB0boLAoC72YktIkFmIt8pB1ZVjPttHeeQYTXFyW6yjI70EMtgO",
+   "https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.esm.min.mjs":"sha384-2svH5QplTeBKhRXWxXOJE2P6pRpgnqVq8l8U1dYXUBXvc2zJ/FMMardtnPnnCXnt",
+   "https://cdn.jsdelivr.net/npm/tabulator-tables@6.6.1/dist/js/tabulator_esm.min.mjs":"sha384-BWRvD85P1JRHxztvZTpRvryElVps0W2/kgg3atlHAcR6zK70eaoV+IwUzLbn6Cao"}}</script>
+  -#}
+  {% block head %}{% endblock %}
+</head>
+<body data-page="{{ page }}" data-module="{% block page_module %}{% endblock %}">
+<a href="#main" class="visually-hidden-focusable btn btn-primary position-absolute m-2 skip-link">Skip to content</a>
+<div class="page">
+
+  <header class="navbar navbar-expand-md d-print-none sticky-top" x-data>
+    <div class="container-xl">
+      <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#nav-offcanvas"
+              aria-controls="nav-offcanvas" aria-label="Open menu">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <a href="/" class="navbar-brand navbar-brand-autodark pe-0 pe-md-3 gap-2 text-reset text-decoration-none">
+        <i class="ti ti-ball-basketball fs-1" aria-hidden="true"></i><span>NBA Quant</span>
+      </a>
+
+      <div class="navbar-nav flex-row order-md-last align-items-center nav-tools">
+        {#- model status: green trained, amber > 7 days old, grey = no model (Elo-only) #}
+        <a href="/model" class="nav-link model-dot" :title="$store.status.modelTitle" :aria-label="$store.status.modelTitle">
+          <span class="status-dot"
+                :class="{'status-green': $store.status.modelState === 'ok',
+                         'status-yellow': $store.status.modelState === 'old',
+                         'status-secondary': !['ok', 'old'].includes($store.status.modelState)}"></span>
+          <span class="d-none d-xl-inline ms-2 small text-secondary"
+                x-text="{ok: 'Model ready', old: 'Model old', none: 'Elo only'}[$store.status.modelState] || ''"></span>
+        </a>
+
+        {#- jobs tray (fed by Alpine.store('jobs')) #}
+        <div class="nav-item dropdown">
+          <a href="#" class="nav-link position-relative" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+             aria-label="Background jobs" title="Background jobs" @click.prevent>
+            <i class="ti ti-activity fs-2" aria-hidden="true"></i>
+            <span class="badge bg-red text-red-fg badge-notification badge-pill" x-show="$store.jobs.count" x-cloak
+                  x-text="$store.jobs.count"></span>
+          </a>
+          <div class="dropdown-menu dropdown-menu-arrow dropdown-menu-end dropdown-menu-card jobs-menu">
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Background jobs</h3></div>
+              <div class="list-group list-group-flush">
+                <template x-for="job in $store.jobs.active" :key="job.id">
+                  <div class="list-group-item">
+                    <div class="d-flex justify-content-between small mb-1">
+                      <strong x-text="$store.jobs.label(job)"></strong>
+                      <span class="text-secondary num" x-text="job.progress != null ? $fmt.pct(job.progress) : ''"></span>
+                    </div>
+                    <div class="progress progress-sm">
+                      <div class="progress-bar" role="progressbar" :aria-label="$store.jobs.label(job) + ' progress'"
+                           :class="job.progress == null ? 'progress-bar-indeterminate' : ''"
+                           :style="job.progress != null ? {width: (job.progress * 100) + '%'} : {}"></div>
+                    </div>
+                    <div class="small text-secondary mt-1 text-truncate" x-text="job.stage || ''"></div>
+                  </div>
+                </template>
+                <div class="list-group-item small text-secondary" x-show="!$store.jobs.count">No running jobs.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {#- odds format (US / decimal), remembered with @alpinejs/persist #}
+        <div class="btn-group btn-group-sm odds-toggle d-none d-sm-inline-flex mx-1" role="group" aria-label="Odds format">
+          <button type="button" class="btn" title="American odds"
+                  :class="$store.prefs.odds === 'us' ? 'btn-primary' : 'btn-outline-secondary'"
+                  :aria-pressed="$store.prefs.odds === 'us'" @click="$store.prefs.setOdds('us')">US</button>
+          <button type="button" class="btn" title="Decimal odds"
+                  :class="$store.prefs.odds === 'dec' ? 'btn-primary' : 'btn-outline-secondary'"
+                  :aria-pressed="$store.prefs.odds === 'dec'" @click="$store.prefs.setOdds('dec')">DEC</button>
+        </div>
+
+        {#- theme toggle; tabler-theme.min.js restores the choice (key "tabler-theme") #}
+        <a href="#" class="nav-link hide-theme-dark" title="Dark mode" aria-label="Switch to dark mode"
+           @click.prevent="$store.prefs.toggleTheme()"><i class="ti ti-moon fs-2" aria-hidden="true"></i></a>
+        <a href="#" class="nav-link hide-theme-light" title="Light mode" aria-label="Switch to light mode"
+           @click.prevent="$store.prefs.toggleTheme()"><i class="ti ti-sun fs-2" aria-hidden="true"></i></a>
+      </div>
+
+      <div class="offcanvas offcanvas-start" tabindex="-1" id="nav-offcanvas" aria-labelledby="nav-offcanvas-title">
+        <div class="offcanvas-header">
+          <h2 class="offcanvas-title" id="nav-offcanvas-title">
+            <i class="ti ti-ball-basketball text-orange" aria-hidden="true"></i> NBA Quant
+          </h2>
+          <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close menu"></button>
+        </div>
+        <div class="offcanvas-body">
+          <ul class="navbar-nav">
+            {%- for p in PAGES %}
+            <li class="nav-item{% if p.key == page %} active{% endif %}">
+              <a class="nav-link" href="{{ p.href }}"{% if p.key == page %} aria-current="page"{% endif %}>
+                <span class="nav-link-icon"><i class="ti ti-{{ p.icon }}" aria-hidden="true"></i></span>
+                <span class="nav-link-title">{{ p.label }}</span>
+              </a>
+            </li>
+            {%- endfor %}
+          </ul>
+          <div class="d-sm-none mt-3">
+            <div class="small text-secondary mb-1">Odds format</div>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Odds format">
+              <button type="button" class="btn" :class="$store.prefs.odds === 'us' ? 'btn-primary' : 'btn-outline-secondary'"
+                      @click="$store.prefs.setOdds('us')">US</button>
+              <button type="button" class="btn" :class="$store.prefs.odds === 'dec' ? 'btn-primary' : 'btn-outline-secondary'"
+                      @click="$store.prefs.setOdds('dec')">DEC</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="page-wrapper">
+    <div class="container-xl shell-banners" x-data>
+      {#- x-show sets inline display:none, which Bootstrap's d-* utilities (!important)
+          would override: keep d-flex on an inner wrapper, never next to x-show. #}
+      <div class="alert alert-info mt-3 mb-0" role="status" x-show="$store.status.demoDate" x-cloak>
+        <div class="d-flex align-items-center gap-2">
+          <i class="ti ti-history fs-2" aria-hidden="true"></i>
+          <div>
+            <strong>Demo mode: replaying <span x-text="$store.status.demoDate"></span></strong>
+            <span class="text-secondary">· historical data; no live injuries or odds</span>
+          </div>
+        </div>
+      </div>
+      <div class="alert alert-danger mt-3 mb-0" role="alert" x-show="$store.status.error && !$store.status.data" x-cloak>
+        <div class="d-flex align-items-center gap-2">
+          <i class="ti ti-plug-connected-x fs-2" aria-hidden="true"></i>
+          <div class="flex-fill" x-text="$store.status.error?.message"></div>
+          <button type="button" class="btn btn-sm btn-outline-danger" @click="$store.status.load()">
+            <i class="ti ti-refresh me-1" aria-hidden="true"></i>Retry
+          </button>
+        </div>
+      </div>
+      <div class="alert alert-warning alert-dismissible mt-3 mb-0" role="status"
+           x-show="$store.status.modelState === 'none' && !$store.banners.isDismissed('no-model')" x-cloak>
+        <div class="d-flex align-items-center gap-2">
+          <i class="ti ti-cpu fs-2" aria-hidden="true"></i>
+          <div>No trained model: showing Elo + Monte Carlo. <a href="/model" class="alert-link">Train (≈10 min) →</a></div>
+        </div>
+        <button type="button" class="btn-close" aria-label="Hide for this session" @click="$store.banners.dismiss('no-model')"></button>
+      </div>
+      <div class="alert alert-warning mt-3 mb-0" role="status" x-show="$store.freshness.stale" x-cloak>
+        <div class="d-flex align-items-center gap-2">
+          <i class="ti ti-cloud-off fs-2" aria-hidden="true"></i>
+          <div>Offline: showing data cached at <span x-text="$fmt.time($store.freshness.stale?.as_of, 'America/New_York')"></span> ET</div>
+        </div>
+      </div>
+    </div>
+
+    {% block page_header %}{% endblock %}
+
+    <main id="main" class="page-body" tabindex="-1">
+      <div class="container-xl">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+
+    <footer class="footer footer-transparent d-print-none" x-data>
+      <div class="container-xl">
+        <div class="row g-2 align-items-start small text-secondary">
+          <div class="col-12 col-lg footer-note">
+            <div>Not affiliated with the NBA. Team colours only, no logos.</div>
+            <div>Forecasts are probabilities, not guarantees, and not betting advice. If you bet, only stake what you can afford to lose.</div>
+          </div>
+          <div class="col-12 col-lg-auto text-lg-end">
+            <div>NBA Quant {{ version }}<span x-show="$store.status.demoDate" x-cloak> · demo</span></div>
+            <div>
+              Data: NBA.com (nba_api) · ESPN · The Odds API
+              <template x-for="s in $store.freshness.list" :key="s.label">
+                <span> · <span x-text="s.label"></span> <span x-text="$fmt.ago(s.as_of)"></span></span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3 app-toasts" x-data aria-live="polite">
+  <template x-for="t in $store.toasts.items" :key="t.id">
+    <div class="toast show" role="status">
+      <div class="toast-header">
+        <span class="status-dot me-2"
+              :class="{success: 'status-green', danger: 'status-red', warning: 'status-yellow'}[t.kind] || 'status-blue'"></span>
+        <strong class="me-auto" x-text="t.title"></strong>
+        <button type="button" class="btn-close" aria-label="Close" @click="$store.toasts.dismiss(t.id)"></button>
+      </div>
+      <div class="toast-body" x-show="t.body || t.href">
+        <span x-text="t.body"></span>
+        <a x-show="t.href" :href="t.href" x-text="t.linkText"></a>
+      </div>
+    </div>
+  </template>
+</div>
+
+{% block modals %}{% endblock %}
+</body>
+</html>

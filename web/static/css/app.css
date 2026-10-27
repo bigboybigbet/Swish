@@ -1,0 +1,111 @@
+/* NBA Quant app styles. Tabler provides the design system; this file adds
+   tokens, the Tabulator <-> Tabler variable mapping and a few components. */
+
+/* Tabulator's bootstrap5 theme reads Bootstrap's --bs-* variables; point
+   them at Tabler's so tables follow the light/dark theme. */
+:root,
+[data-bs-theme] {
+  --bs-body-bg: var(--tblr-body-bg);
+  --bs-body-color: var(--tblr-body-color);
+  --bs-border-color: var(--tblr-border-color);
+  --bs-emphasis-color: var(--tblr-emphasis-color);
+  --bs-secondary-bg: var(--tblr-secondary-bg);
+  --bs-tertiary-bg: var(--tblr-tertiary-bg);
+}
+
+:root {
+  --nq-win: var(--tblr-green);
+  --nq-loss: var(--tblr-red);
+  --nq-push: var(--tblr-secondary);
+  --nq-badge-size: 2rem;
+}
+
+[x-cloak] { display: none !important; }
+
+/* Numbers line up in tables, tiles and charts' HTML labels. */
+.num,
+.table,
+.tabulator,
+.stat-tile .h1,
+.stat-tile .h2,
+.stat-tile .h3 { font-variant-numeric: tabular-nums; }
+
+/* ── navbar ─────────────────────────────────────────────────────────────── */
+.navbar-brand .ti { color: var(--tblr-orange); }
+.navbar .nav-tools { gap: .25rem; }
+.navbar .nav-tools .nav-link { padding-inline: .5rem; }
+.navbar .odds-toggle .btn { min-width: 2.75rem; }
+.jobs-menu { min-width: 18rem; }
+.model-dot { cursor: pointer; }
+
+/* ── team badge: coloured circle with the abbreviation (no logos) ──────── */
+.team-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--nq-badge-size);
+  height: var(--nq-badge-size);
+  border-radius: 50%;
+  font-size: calc(var(--nq-badge-size) * .32);
+  font-weight: 700;
+  letter-spacing: .02em;
+  line-height: 1;
+  background: var(--tblr-secondary-bg);
+  color: var(--tblr-body-color);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08);
+}
+.team-badge.badge-sm { --nq-badge-size: 1.5rem; }
+.team-badge.badge-lg { --nq-badge-size: 3rem; }
+
+/* ── two-colour probability bar ─────────────────────────────────────────── */
+.prob-split { height: .5rem; }
+.prob-split .progress-bar { transition: width .3s ease; }
+
+/* ── stat tiles ─────────────────────────────────────────────────────────── */
+.stat-tile .subheader { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── glossary tooltips on headers ───────────────────────────────────────── */
+.glossary-tip { cursor: help; color: var(--tblr-secondary); font-size: .85em; vertical-align: baseline; }
+
+/* ── win / loss / push signs always come with colour, never colour alone ── */
+.text-win { color: var(--nq-win) !important; }
+.text-loss { color: var(--nq-loss) !important; }
+
+/* ── horizontally scrolling chip rows (mobile filters) ─────────────────── */
+.chips-scroll { display: flex; gap: .5rem; overflow-x: auto; scrollbar-width: none; }
+.chips-scroll::-webkit-scrollbar { display: none; }
+.chips-scroll > * { flex: none; }
+
+/* ── page-level sticky action bar on phones ─────────────────────────────── */
+.mobile-actionbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1020;
+  padding: .75rem 0;
+  background: var(--tblr-body-bg);
+  border-top: 1px solid var(--tblr-border-color);
+}
+@media (min-width: 768px) { .mobile-actionbar { display: none; } }
+
+/* ── toasts dock at the bottom on phones ────────────────────────────────── */
+.app-toasts { z-index: 1090; }
+@media (max-width: 575.98px) {
+  .app-toasts { left: 0; right: 0; padding: .5rem !important; }
+  .app-toasts .toast { width: 100%; }
+}
+
+/* ── shell banners ──────────────────────────────────────────────────────── */
+.shell-banners:empty { display: none; }
+.shell-banners .alert { margin-bottom: .75rem; }
+.shell-banners { padding-top: 1rem; }
+
+/* ── coming-soon / empty states ─────────────────────────────────────────── */
+.empty-icon .ti { font-size: 2.5rem; }
+.coming-soon { min-height: 50vh; }
+
+/* ── footer ─────────────────────────────────────────────────────────────── */
+.footer .footer-note { max-width: 46rem; }
+
+/* ── accessibility ──────────────────────────────────────────────────────── */
+.skip-link { z-index: 2000; }

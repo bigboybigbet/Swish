@@ -19,9 +19,41 @@ pre-game: results before the game's date only, future fixtures allowed):
 Who-plays control (incentives_rotation): share of the team's top-5 recent-
 minutes players who sit tonight.
 
-fit_predict: L2 logistic regression on the base features plus a few home-
-minus-away incentive features (all zero in the playoffs).  Feature sets
-are module constants so the eval script can switch them.
+fit_predict: logistic regression (standardised, L2 C=1) on the base
+features plus home-minus-away incentive features (all zero in playoffs).
+
+Chosen on the dev window (2014-15..2016-17): a single feature,
+D_STAKE_LATE = (stake_home - stake_away) when either team has <= 20 games
+left, else 0, where stake = P(postseason | W) - P(postseason | L) +
+same for top-4 seed + same for the 1 seed.  Full-season stake, the tank
+incentive and the rest / dead flags added nothing on dev (FULL_INCENTIVE is
+reported as a pre-declared secondary set, not selected).
+
+Results (research/variants/incentives_eval.py; holdout 2017-18..2023-24,
+frozen config): overall logloss 0.6277 -> 0.6269 (d -0.0008 +- 0.0006, not
+a win); either-team-in-last-20-games subset d -0.0036 +- 0.0027; with the
+who-plays control the gain shrinks to -0.0005 +- 0.0005.  Who-plays itself:
+-0.0055 +- 0.0011.  2019-20 (bubble) is the only season where it clearly
+hurts; the last three seasons show no effect.  Not recommended for
+production as is.  (Audit fix: 2019-20 games remaining before the March 2020
+suspension now count from the 82-game schedule, not the realised 64-75
+games; first run gave 0.6270, d -0.0007.)
+
+Live use (each morning, before predictions):
+  1. logs = nba_api leaguegamefinder team logs up to yesterday (the app
+     already pulls them); schedule = this season's regular-season fixtures
+     (nba_api scheduleleaguev2 or ESPN), only dates and teams are used;
+  2. incentives_sim.live_day(logs, schedule, today, season) refits the
+     ridge ratings on games before today, builds W-L from completed games,
+     simulates every remaining fixture 2,000 times (~0.1-0.3 s) and returns
+     leverage / tank / flags / standings for today's games;
+  3. team_features() + D_STAKE_LATE as in build_dataset, then the logistic
+     fitted on the last three completed seasons;
+  4. who-plays: MISS5 from the official injury report / inactive list
+     (~30 min before tip) against the last-10-games minutes leaders.
+  Rule changes to watch: play-in format, lottery odds, and since 2023-24
+  the two in-season-tournament games per team that are scheduled only in
+  December (add them as phantom games, like 2019-20, until they are known).
 """
 import numpy as np
 import pandas as pd
@@ -35,10 +67,11 @@ from research.variants.incentives_standings import pregame_standings, regular_se
 
 BASE = ["ADJ_PRED", "H_B2B", "A_B2B"]
 WHO = ["D_MISS5"]
-INCENTIVE = ["D_STAKE", "D_TANK", "D_REST"]
+INCENTIVE = ["D_STAKE_LATE"]
+FULL_INCENTIVE = ["D_STAKE_LATE", "D_TANK_LATE", "D_REST"]
 FEATURES = BASE + INCENTIVE
 C = 1.0
-LATE_GAMES = 15          # "late season": team has at most this many games left
+LATE_GAMES = 20          # "late season": team has at most this many games left
 NO_STAKE = 0.01          # stake below this = nothing left to play for
 
 
@@ -78,6 +111,7 @@ def build_dataset(raw: pd.DataFrame) -> pd.DataFrame:
     late = ((df["LATE_H"] + df["LATE_A"]) > 0).astype(float)
     df["D_STAKE_LATE"] = df["D_STAKE"] * late
     df["D_TANK_LATE"] = df["D_TANK"] * late
+    df["D_POST_LATE"] = (df["LEV_POST_H"] - df["LEV_POST_A"]).fillna(0.0) * late
     return df.sort_values(["GAME_DATE", "GAME_ID"]).reset_index(drop=True)
 
 

@@ -1,0 +1,21 @@
+{#- Placeholder for pages whose milestone hasn't shipped yet (see routers/pages.py). -#}
+{% extends "base.html" %}
+{% from "_macros.html" import PAGES, page_header, empty_state %}
+
+{% block page_header %}
+{%- for p in PAGES if p.key == page %}{{ page_header(p.label) }}{% endfor %}
+{% endblock %}
+
+{% block content %}
+{%- for p in PAGES if p.key == page %}
+<div class="card coming-soon">
+  <div class="card-body d-flex align-items-center justify-content-center">
+    {% call empty_state(p.icon, p.label ~ " is coming soon", p.about) %}
+      <a href="/" class="btn btn-outline-secondary{% if page == 'slate' %} d-none{% endif %}">
+        <i class="ti ti-arrow-left me-1" aria-hidden="true"></i>Back to Slate
+      </a>
+    {% endcall %}
+  </div>
+</div>
+{%- endfor %}
+{% endblock %}

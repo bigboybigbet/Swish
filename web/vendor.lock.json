@@ -1,0 +1,95 @@
+{
+  "comment": "Frontend libraries vendored under web/static/vendor/<dir>/. Run `python scripts/vendor.py` to (re)create them and `python scripts/vendor.py --check` to verify. Each file is checked against its sha384; tarballs against the npm dist.integrity. Never copy anything from Tabler dist/libs/.",
+  "packages": [
+    {
+      "name": "@tabler/core",
+      "version": "1.6.1",
+      "license": "MIT",
+      "published": "2026-09-28",
+      "tarball": "https://registry.npmjs.org/@tabler/core/-/core-1.6.1.tgz",
+      "integrity": "sha512-lgmR9gcxRp5JlLxcmRi9Rz85JrEvH6Bz71KnlcPVSa97wtwQNjgSs3g3fxwbAlulHyRMghhIV04QUuW3pqDsIg==",
+      "cdn": "https://cdn.jsdelivr.net/npm/@tabler/core@1.6.1/",
+      "dir": "@tabler/core@1.6.1",
+      "files": {
+        "tabler.min.css": {"src": "dist/css/tabler.min.css", "sha384": "tT2UAGE9hxG/p5d0iGIvZ/s8El3nWWG3tfG02i8iOY5Pbf8cZZRVmcrrVs+JG5Vw"},
+        "tabler.min.js": {"src": "dist/js/tabler.min.js", "sha384": "1yCHfhyU8+V33urXkAlLLpNYd9jdzXkxdafCg0+auIIEtYFnOuM/DwJQgk5sXY98"},
+        "tabler-theme.min.js": {"src": "dist/js/tabler-theme.min.js", "sha384": "gPM8vc3koNjMZtzPmhqasm5L6/Zak4DcWmRrPt4GZJBKSEKQfwyFIehZzq2TH1AZ"},
+        "LICENSE": {"url": "https://raw.githubusercontent.com/tabler/tabler/%40tabler/core%401.6.1/LICENSE", "sha384": "by2ekPvtjCoXUrTQFq3uz7L6f3p0LsUO7is9476e9fianwetNIOzY26yMPRB9Zfb"}
+      }
+    },
+    {
+      "name": "@tabler/icons-webfont",
+      "version": "3.49.0",
+      "license": "MIT",
+      "published": "2026-10-05",
+      "tarball": "https://registry.npmjs.org/@tabler/icons-webfont/-/icons-webfont-3.49.0.tgz",
+      "integrity": "sha512-kWgnmEzo17dzQyMqRmlfj+TiGV0clLMYfUtKp2WG7M+TH5418o6fsoaSlrOTK3lwESg0xS7jVfOozYrR02Ryxw==",
+      "cdn": "https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.49.0/",
+      "dir": "@tabler/icons-webfont@3.49.0",
+      "files": {
+        "tabler-icons.min.css": {"src": "dist/tabler-icons.min.css", "sha384": "IcAOG/1tqv9Qnam+j3mZYPAFcNQMnQpMcafc8Nsvd44AUeTCzhUzdQiJkrROmqW6"},
+        "fonts/tabler-icons.woff2": {"src": "dist/fonts/tabler-icons.woff2", "sha384": "yBEWz226ooaXrXHlWwyPfgx8Ek8aHmIzCAU71izjTxVK0GSmFyrnX08fW8S7yAxm"},
+        "LICENSE": {"src": "LICENSE", "sha384": "3vjrpMclxT2jEBFvd7pt/SlXw4zXaw2yR+uloMbLsmH/IbhBIs+spEV2dtZ9VtjT"}
+      }
+    },
+    {
+      "name": "alpinejs",
+      "version": "3.17.4",
+      "license": "MIT",
+      "published": "2026-09-21",
+      "tarball": "https://registry.npmjs.org/alpinejs/-/alpinejs-3.17.4.tgz",
+      "integrity": "sha512-N2gsr+58XVUt7OAPKnUGiKPDtkd+xbSGTae8C8IJxeRdkkhBJPIautkJ+qcwb7lcjJ/QK3/CPVIbN20JPvtK7A==",
+      "cdn": "https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/",
+      "dir": "alpinejs@3.17.4",
+      "files": {
+        "module.esm.min.js": {"src": "dist/module.esm.min.js", "sha384": "1Ke8PPO06VpcxfoPiRe4Jjq31uQTfwsebhSRsFKmzNNFeZY91GCD3tFaalnLaU30"},
+        "LICENSE.md": {"url": "https://raw.githubusercontent.com/alpinejs/alpine/v3.17.4/LICENSE.md", "sha384": "mPDeTwJRT4aRsEPcFO8TKeh7q5BLRuVhTpyUvCHsKe5BZIXSpXRdyCVbkoZ2budt"}
+      }
+    },
+    {
+      "name": "@alpinejs/persist",
+      "version": "3.17.4",
+      "license": "MIT",
+      "published": "2026-09-21",
+      "tarball": "https://registry.npmjs.org/@alpinejs/persist/-/persist-3.17.4.tgz",
+      "integrity": "sha512-ZTPF2eqYP0khAKrlQRD/dz/q1W4yWAnbwmd25NyMOQmFOD9839xP2+Go4zDp2w2jfSQPM4SL1nA5X0knUpSsTw==",
+      "cdn": "https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.17.4/",
+      "dir": "@alpinejs/persist@3.17.4",
+      "files": {
+        "module.esm.min.js": {"src": "dist/module.esm.min.js", "sha384": "GVzTX289e7FrOjB0boLAoC72YktIkFmIt8pB1ZVjPttHeeQYTXFyW6yjI70EMtgO"},
+        "LICENSE.md": {"url": "https://raw.githubusercontent.com/alpinejs/alpine/v3.17.4/LICENSE.md", "sha384": "mPDeTwJRT4aRsEPcFO8TKeh7q5BLRuVhTpyUvCHsKe5BZIXSpXRdyCVbkoZ2budt"}
+      }
+    },
+    {
+      "name": "echarts",
+      "version": "6.1.0",
+      "license": "Apache-2.0",
+      "published": "2026-05-19",
+      "tarball": "https://registry.npmjs.org/echarts/-/echarts-6.1.0.tgz",
+      "integrity": "sha512-q0yaFPggC9FUdsWH4blavRWFmxdrIodbkoKNAjJudAI6CA9gNPxHtV2RcZNEepZVlk4yvBYkOkbk6HIVpIyHZA==",
+      "cdn": "https://cdn.jsdelivr.net/npm/echarts@6.1.0/",
+      "dir": "echarts@6.1.0",
+      "files": {
+        "echarts.esm.min.mjs": {"src": "dist/echarts.esm.min.mjs", "sha384": "2svH5QplTeBKhRXWxXOJE2P6pRpgnqVq8l8U1dYXUBXvc2zJ/FMMardtnPnnCXnt"},
+        "LICENSE": {"src": "LICENSE", "sha384": "wY9du5C3iVv5O+jVA/gHJUN/HJa61cxqdrooiRzlXnJuRGhumJuLbqtqexsFVF2g"},
+        "NOTICE": {"src": "NOTICE", "sha384": "pKJithqWm1auLMQiYIUOm1Ds29m33zgx8XVNRJEQupmxHfoqKkMZ+G7caZ5MW/7Q"},
+        "licenses/LICENSE-d3": {"src": "licenses/LICENSE-d3", "sha384": "BSSAv03xbPfVhjqnlyAtxivlMHUZZCooRPz9NUCweL7FSGze6offQrOZEQkZyn2n"}
+      }
+    },
+    {
+      "name": "tabulator-tables",
+      "version": "6.6.1",
+      "license": "MIT",
+      "published": "2026-09-30",
+      "tarball": "https://registry.npmjs.org/tabulator-tables/-/tabulator-tables-6.6.1.tgz",
+      "integrity": "sha512-8A77aN30vJS34w1P5h4HtgEajB7vX2v0AD1fXFIKxp6SxplpGGfKn0Y4ouY91+6gdGK8/quqXoCA2LkrhBVE3A==",
+      "cdn": "https://cdn.jsdelivr.net/npm/tabulator-tables@6.6.1/",
+      "dir": "tabulator-tables@6.6.1",
+      "files": {
+        "tabulator_esm.min.mjs": {"src": "dist/js/tabulator_esm.min.mjs", "sha384": "BWRvD85P1JRHxztvZTpRvryElVps0W2/kgg3atlHAcR6zK70eaoV+IwUzLbn6Cao"},
+        "tabulator_bootstrap5.min.css": {"src": "dist/css/tabulator_bootstrap5.min.css", "sha384": "G3nHFKuWvqfHxFfuwr4pyZK3g3pTse3g3RtcK/gJ7picizkfM3KyRHxBXqcgRGzh"},
+        "LICENSE": {"src": "LICENSE", "sha384": "z0Kwv0hox+7tRanajvEXOos/2aX1+idsiO0a5CMifBP89EgTn/w/yswhHWUo0SWR"}
+      }
+    }
+  ]
+}

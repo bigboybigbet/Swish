@@ -47,12 +47,12 @@ NEUTRAL_WINDOWS = [("2020-07-30", "2020-10-11"), ("2023-12-07", "2023-12-07")]
 PARAMS = dict(
     mode="od",           # "net" or "od"
     sigma=12.0,          # initial sd of a game margin around its expectation
-    adapt=0.001,         # weight of each game in the online estimate of σ²
-    q=0.0066,            # team-strength variance added per day (points²/day)
+    adapt=0.0011,        # weight of each game in the online estimate of σ²
+    q=0.0061,            # team-strength variance added per day (points²/day)
     v0=30.0,             # team variance at the very first game (2010-11)
     rho=0.625,           # share of a team's strength kept over the summer
-    v_season=2.3,        # variance added to every team at a new season
-    home0=3.0, v_home0=1.0, q_home=9e-4,     # league home edge
+    v_season=2.29,       # variance added to every team at a new season
+    home0=3.0, v_home0=1.0, q_home=8.8e-4,   # league home edge
     v_team_home=1.0,     # prior variance of per-team home edges (0 = none)
     b2b0=1.0, v_b2b0=1.0, q_b2b=0.0,          # back-to-back penalty
     lineup0=0.0, v_lineup0=1.0, q_lineup=0.0,  # lineup coefficients β
@@ -61,8 +61,8 @@ PARAMS = dict(
     # od mode only
     sigma_t=18.0,        # sd of the game total (points)
     mu0=100.0, v_mu0=25.0, q_mu=0.01,         # league scoring level per team
-    off_share=0.415,     # share of the strength variances given to offense
-    rho_off=0.58, rho_def=0.675,              # per-side summer reversion
+    off_share=0.40,      # share of the strength variances given to offense
+    rho_off=0.533, rho_def=0.637,             # per-side summer reversion
 )
 
 PLAYER_PARAMS = dict(
@@ -73,7 +73,7 @@ PLAYER_PARAMS = dict(
     h_min=15.0,          # half-life (days) of the expected-minutes average
     km=3.0, m0=10.0,     # prior games / minutes of the expected-minutes average
     top=10,              # players per team counted in the lineup
-    gmsc_avg=0.3413,     # league Game Score per minute 2010-24
+    gmsc_avg=0.3176,     # league Game Score per minute 2010-11 … 2016-17
 )
 LINEUP_COLS = ["L_GMSC", "L_ONOFF"]
 
