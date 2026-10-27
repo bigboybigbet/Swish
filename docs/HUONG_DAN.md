@@ -77,6 +77,10 @@ Trong lúc này app tải các mùa 2023-24 đến 2026-27, tính rating cho c�
 
 **Xem lịch hôm nay:** trang chủ (**Slate**) liệt kê mọi trận trong ngày, tính theo ngày giờ miền Đông Mỹ. Dùng nút ‹ › hoặc phím mũi tên để chuyển ngày. Bấm **Run predictions**, mỗi thẻ trận sẽ hiện dần: % thắng, spread, total, rating hai đội và tỷ lệ của nhà cái. Phía trên có bộ đếm kèo VIP (từ 65% trở lên và hai engine cùng đồng ý) và các kèo có lợi thế (value) so với nhà cái, bấm vào để lọc. Trận đã đá xong được đánh dấu đúng/sai. Bấm vào một thẻ để mở phân tích chi tiết.
 
+**Ratings:** bảng xếp hạng 30 đội theo rating Kalman-Elo (số điểm mạnh hơn đội trung bình, ± độ bất định), thay đổi 7 ngày và đường xu hướng cả mùa. Tab Players hiện mức ảnh hưởng của từng cầu thủ, dùng để tính chấn thương.
+
+**Accuracy:** chấm điểm mọi trận bằng dự đoán đưa ra *trước* giờ bóng lăn: tỷ lệ đoán đúng, log loss, Brier, biểu đồ calibration (model nói 70% thì đội đó có thắng khoảng 70% không), tỷ lệ đúng theo mức tự tin và theo từng tuần.
+
 **Dự đoán một trận:** vào trang **Game** và chọn đội nhà, đội khách. App hiển thị:
 - xác suất thắng và spread;
 - tổng điểm kèm khoảng dao động;
@@ -125,7 +129,7 @@ NBA_HISTORY_DIR=../nba-data-2010-2024 NBA_QUANT_DEMO_DATE=2024-03-15 python -m s
 
 ## Giao diện cũ (Streamlit)
 
-Các trang Accuracy (backtest), Bets (ROI) và Ratings của web app chưa làm xong. Trong lúc chờ, bạn vẫn dùng được app cũ, chạy cùng model mới:
+Trang Bets (ROI) của web app chưa làm xong. Trong lúc chờ, bạn vẫn dùng được app cũ, chạy cùng model mới:
 
 ```bash
 streamlit run nba_app.py

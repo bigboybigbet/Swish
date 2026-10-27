@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "_macros.html" import page_header, stat_tile %}
+
+{% block page_module %}/static/js/pages/accuracy.js{% endblock %}
+
+{% block head %}
+<style>
+  .chart-box { height: 300px; width: 100%; }
+  .tier-row .progress { height: .5rem; }
+</style>
+{% endblock %}
+
+{% block page_header %}{{ page_header("Accuracy") }}{% endblock %}
+
+{% block content %}
+<div x-data="accuracyPage" x-cloak>
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="btn-group" role="group" aria-label="Period">
+      <template x-for="w in [['season', 'This season'], ['30d', 'Last 30 days'], ['all', 'All seasons']]" :key="w[0]">
+        <button type="button" class="btn" :class="window === w[0] ? 'btn-primary' : 'btn-outline-secondary'"
+                @click="window = w[0]" :aria-pressed="window === w[0]" x-text="w[1]"></button>
+      </template>
+    </div>
+    <span class="small text-secondary" x-show="data?.n"
+          x-text="$fmt.day(data?.from, true) + ' – ' + $fmt.day(data?.to, true) + ' · ' + data?.n + ' games'"></span>
+  </div>
+
+  <p class="text-secondary">
+    Every game is graded with the prediction the ratings gave <em>before</em> tip-off, so this is how the model
+    would actually have done. Log loss and Brier score reward confident predictions that come true and punish
+    confident misses; lower is better (a coin flip scores 0.693 and 0.250).
+  </p>
+
+  <div class="alert alert-warning" x-show="error" role="alert">
+    <span x-text="error?.message"></span>
+    <a href="/model" class="alert-link ms-1" x-show="error?.code === 'no_model'">Go to Model →</a>
+  </div>
+
+  <div class="card" x-show="data && !data.n"><div class="card-body text-secondary">No games in this period yet.</div></div>
+
+  <div x-show="data?.n">
+    <div class="row row-cards mb-3">
+      <div class="col-6 col-lg-3">{{ stat_tile("Picks correct", "data?.n ? $fmt.pct(data.acc, 1) : '–'",
+          "lift == null ? '' : $fmt.signed(lift * 100, 1) + ' pts vs. always picking home'") }}</div>
+      <div class="col-6 col-lg-3">{{ stat_tile("Log loss", "data?.n ? $fmt.num(data.log_loss, 3) : '–'", "'coin flip 0.693'") }}</div>
+      <div class="col-6 col-lg-3">{{ stat_tile("Brier score", "data?.n ? $fmt.num(data.brier, 3) : '–'", "'coin flip 0.250'") }}</div>
+      <div class="col-6 col-lg-3">{{ stat_tile("Margin error", "data?.n ? $fmt.num(data.margin_mae) + ' pts' : '–'", "'average miss on the spread'") }}</div>
+    </div>
+
+    <div class="row row-cards mb-3">
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title">Calibration</h3></div>
+          <div class="card-body">
+            <p class="small text-secondary mb-2">When the model says 70%, does the home team win about 70% of the time?
+              Dots on the dashed line mean yes; bigger dots hold more games.</p>
+            <div class="chart-box" x-data="accuracyChart('calibration')"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title">By confidence</h3></div>
+          <div class="card-body">
+            <p class="small text-secondary">The more confident the pick, the more often it should be right.</p>
+            <template x-for="t in data?.tiers || []" :key="t.tier">
+              <div class="tier-row mb-3">
+                <div class="d-flex justify-content-between small mb-1">
+                  <span x-text="tierLabel(t.tier)"></span>
+                  <span class="num"><strong x-text="t.acc == null ? '–' : $fmt.pct(t.acc, 1)"></strong>
+                    <span class="text-secondary" x-text="' · ' + t.n + ' games'"></span></span>
+                </div>
+                <div class="progress"><div class="progress-bar"
+                     :class="{high: 'bg-green', medium: 'bg-yellow', low: 'bg-secondary'}[t.tier]"
+                     :style="{width: ((t.acc || 0) * 100) + '%'}"></div></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Week by week</h3></div>
+      <div class="card-body">
+        <div class="chart-box" x-data="accuracyChart('trend')"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "_macros.html" import page_header, empty_state, skeleton_rows, team_badge %}
+
+{% block page_module %}/static/js/pages/ratings.js{% endblock %}
+
+{% block head %}
+<style>
+  .rating-table td { vertical-align: middle; }
+  .rating-table .num { font-variant-numeric: tabular-nums; }
+  .rating-bar { position: relative; height: .5rem; min-width: 7rem; background: var(--tblr-bg-surface-secondary); border-radius: 1rem; }
+  .rating-bar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--tblr-border-color); }
+  .rating-bar span { position: absolute; top: 0; bottom: 0; border-radius: 1rem; }
+  .spark path { fill: none; stroke: var(--tblr-primary); stroke-width: 1.5; }
+  .impact-bar { height: .4rem; background: var(--tblr-orange); border-radius: 1rem; }
+  @media (max-width: 767.98px) { .rating-table .hide-sm { display: none; } }
+</style>
+{% endblock %}
+
+{% block page_header %}{{ page_header("Ratings") }}{% endblock %}
+
+{% block content %}
+<div x-data="ratingsPage" x-cloak>
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item"><button type="button" class="nav-link" :class="{active: tab === 'teams'}" @click="tab = 'teams'" role="tab" :aria-selected="tab === 'teams'">Teams</button></li>
+    <li class="nav-item"><button type="button" class="nav-link" :class="{active: tab === 'players'}" @click="tab = 'players'" role="tab" :aria-selected="tab === 'players'">Players</button></li>
+  </ul>
+
+  <div class="alert alert-warning" x-show="error" role="alert">
+    <span x-text="error?.message"></span>
+    <a href="/model" class="alert-link ms-1" x-show="error?.code === 'no_model'">Go to Model →</a>
+  </div>
+
+  {#- teams -#}
+  <div x-show="tab === 'teams'">
+    <p class="text-secondary">
+      Kalman-Elo rating: points better than an average team on a neutral floor, with ± one standard deviation of
+      uncertainty. Home court adds about 2.5 points. A 5-point gap is roughly a 65–35 game.
+      <span x-show="teams" x-text="'Through ' + $fmt.day(teams?.last_game_date, true) + ' · ' + (teams?.season || '') + ' season.'"></span>
+    </p>
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table rating-table">
+          <thead><tr>
+            <th class="w-1">#</th><th>Team</th><th class="hide-sm">Record</th>
+            <th class="text-end">Rating</th><th class="hide-sm"></th>
+            <th class="text-end">7 days</th><th class="hide-sm">This season</th>
+          </tr></thead>
+          <tbody>
+            <template x-if="!teams && !error"><tr><td colspan="7">{{ skeleton_rows(10) }}</td></tr></template>
+            <template x-for="t in teams?.teams || []" :key="t.team_id">
+              <tr>
+                <td class="text-secondary num" x-text="t.rank"></td>
+                <td><div class="d-flex align-items-center gap-2">{{ team_badge("t") }}<span x-text="t.name"></span></div></td>
+                <td class="hide-sm num text-secondary" x-text="t.wins + '–' + t.losses"></td>
+                <td class="text-end num">
+                  <strong x-text="$fmt.signed(t.rating)"></strong>
+                  <span class="text-secondary small" x-text="'±' + $fmt.num(t.sd)"></span>
+                </td>
+                <td class="hide-sm"><div class="rating-bar"><span :style="barStyle(t.rating)"
+                     :class="t.rating >= 0 ? 'bg-green' : 'bg-red'"></span></div></td>
+                <td class="text-end num" :class="t.change_7d > 0.05 ? 'text-green' : (t.change_7d < -0.05 ? 'text-red' : 'text-secondary')">
+                  <i class="ti" :class="t.change_7d > 0.05 ? 'ti-arrow-up-right' : (t.change_7d < -0.05 ? 'ti-arrow-down-right' : '')" aria-hidden="true"></i>
+                  <span x-text="changeText(t.change_7d)"></span>
+                </td>
+                <td class="hide-sm">
+                  <svg class="spark" width="110" height="28" viewBox="0 0 110 28" role="img"
+                       :aria-label="t.name + ' rating this season'"><path :d="spark(t.path)"></path></svg>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {#- players -#}
+  <div x-show="tab === 'players'">
+    <p class="text-secondary">
+      Player impact: each player's share of his team's points, rebounds and assists (capped at 0.40). The model uses
+      it to take points off a team when the player is injured. Update it on the Model page.
+      <span x-show="players?.updated" x-text="'Season ' + (players?.season || '') + ', updated ' + (players?.updated || '') + '.'"></span>
+    </p>
+    <div class="mb-3" style="max-width: 20rem">
+      <input type="search" class="form-control" placeholder="Search players" x-model="query" aria-label="Search players">
+    </div>
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead><tr><th class="w-1">#</th><th>Player</th><th class="text-end">Impact</th><th class="w-50 hide-sm"></th></tr></thead>
+          <tbody>
+            <template x-if="!players"><tr><td colspan="4">{{ skeleton_rows(10) }}</td></tr></template>
+            <template x-for="(p, i) in filteredPlayers" :key="p.name">
+              <tr>
+                <td class="text-secondary" x-text="i + 1"></td>
+                <td x-text="p.name"></td>
+                <td class="text-end num" x-text="$fmt.num(p.impact * 100, 1) + '%'"></td>
+                <td class="hide-sm"><div class="impact-bar" :style="{width: (p.impact / 0.4 * 100) + '%'}"></div></td>
+              </tr>
+            </template>
+            <tr x-show="players && !filteredPlayers.length"><td colspan="4" class="text-secondary">No player matches.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

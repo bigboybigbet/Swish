@@ -113,13 +113,17 @@ Until this has run once, predictions fall back to plain Elo. Seasons roll forwar
 
 The home page (**Slate**) lists every game of the day (US Eastern date; ‹ › or the arrow keys move between days). Press **Run predictions**: each card fills in as its game is predicted, with win %, spread, total and both teams' ratings next to the market line. VIP picks (≥ 65% and both engines agree) and value spots against the market are counted at the top and can be filtered; finished games are marked correct or missed. Click a card for the full analysis.
 
-### 6. Predict a game
+### 6. Ratings and accuracy
+
+**Ratings** ranks all 30 teams by their Kalman-Elo rating (points above an average team, ± its uncertainty) with the 7-day change and the season's path, plus the player impact weights used for injuries. **Accuracy** grades every game of the replayed seasons with the prediction made *before* tip-off: picks correct, log loss, Brier score, a calibration chart, accuracy by confidence and week by week. Both work offline from the ratings Train builds.
+
+### 7. Predict a game
 
 Open **Game**, pick the home and away teams, and the app shows the win probability, expected margin (spread), total, the team ratings with their uncertainty, injuries from the ESPN report, and a breakdown of the probability into rating gap, home court, back-to-back and injuries. Enter bookmaker moneylines (or set an Odds API key) to see the edge and a capped Kelly stake.
 
 To keep the ratings current during the season, press **Grade new games** on the Model page after games finish: it grades the new results and rebuilds the ratings.
 
-### 7. Optional keys
+### 8. Optional keys
 
 On the **Settings** page, or in a `.env` file copied from `.env.example`:
 
@@ -130,7 +134,7 @@ On the **Settings** page, or in a `.env` file copied from `.env.example`:
 
 Keys stay in `.env` on your machine (gitignored); the app never sends them to the browser.
 
-### 8. Try it offline (demo mode)
+### 9. Try it offline (demo mode)
 
 Replay any date from 2010-11 to 2023-24 with real historical games, no network needed:
 
@@ -143,7 +147,7 @@ On Windows PowerShell set the variables first: `$env:NBA_HISTORY_DIR="..\nba-dat
 
 ### The previous interface
 
-The Streamlit app still works and uses the same model: `streamlit run nba_app.py`. The Accuracy, Bets and Ratings pages of the web app are still being built, so use Streamlit for range backtests and the ROI log until then.
+The Streamlit app still works and uses the same model: `streamlit run nba_app.py`. The Bets page of the web app is still being built, so use Streamlit for the ROI log until then.
 
 ### Troubleshooting
 
