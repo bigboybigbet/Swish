@@ -113,8 +113,12 @@
 {%- endmacro %}
 
 {#- Coloured circle with the abbreviation. team_expr → {id, abbr, name, colors?}. -#}
+{#- Team logo (NBA CDN), or the colour badge when the logo is off or fails to load. -#}
 {% macro team_badge(team_expr, size="") -%}
-<span class="team-badge {{ size }}" :style="$teamStyle({{ team_expr }})"
+<img class="team-logo {{ size }}" alt="" loading="lazy" decoding="async"
+     x-show="$teamLogo({{ team_expr }})" :src="$teamLogo({{ team_expr }}) || ''"
+     :title="({{ team_expr }})?.name || ''" @error="$store.logos.fail({{ team_expr }})">
+<span class="team-badge {{ size }}" x-show="!$teamLogo({{ team_expr }})" :style="$teamStyle({{ team_expr }})"
       x-text="({{ team_expr }})?.abbr || ''" :title="({{ team_expr }})?.name || ''"></span>
 {%- endmacro %}
 

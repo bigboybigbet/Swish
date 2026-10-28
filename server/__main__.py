@@ -60,6 +60,7 @@ def main(argv=None):
 
     # create_app() runs in uvicorn (and in the reload worker): pass the address via env.
     os.environ["NBA_HOST"], os.environ["NBA_PORT"] = args.host, str(args.port)
+    os.environ.setdefault("SWISH_AUTO_REFRESH", "1")      # ratings follow new results by themselves
 
     if not security.is_loopback_host(args.host):
         print(f"WARNING: binding to {args.host}, not loopback. Anyone who can reach this "

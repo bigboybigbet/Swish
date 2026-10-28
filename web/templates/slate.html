@@ -13,6 +13,9 @@
   .slate-card .team-row .prob { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
   .slate-card .team-row .score { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 2.25rem; text-align: right; }
   .slate-card .team-row.fav .name { font-weight: 600; }
+  .slate-card .team-row.won .name, .slate-card .team-row.won .score { font-weight: 700; }
+  .slate-card .team-row.lost { opacity: .6; }
+  .slate-card .team-row .prob { min-width: 3.5rem; text-align: right; }
   .slate-card .prob-split { height: .5rem; }
   .slate-card .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
   .slate-card .tile { background: var(--tblr-bg-surface-secondary); border-radius: var(--tblr-border-radius); padding: .4rem .5rem; }
@@ -46,6 +49,11 @@
     <button type="button" class="btn btn-ghost-secondary" x-show="!isToday" @click="go($store.status.todayEt)">Today (ET)</button>
     <span class="ms-1" x-show="asOf">{{ freshness("asOf", "stale", "Scoreboard") }}</span>
     <span class="small text-secondary" x-show="scanAt" x-text="'· Predictions ' + $fmt.ago(scanAt)"></span>
+    <span class="small d-inline-flex align-items-center gap-1" x-show="polling"
+          :class="liveCount ? 'text-red' : 'text-secondary'" title="Scores refresh every minute">
+      <span class="status-dot status-dot-animated" :class="liveCount ? 'status-red' : 'status-green'"></span>
+      <span x-text="liveCount ? liveCount + ' live · auto-updating' : 'Auto-updating'"></span>
+    </span>
     <div class="ms-auto run-bar d-none d-md-block">
       <button type="button" class="btn btn-primary" @click="run()" :disabled="!!job || !games.length">
         <i class="ti ti-player-play me-1" aria-hidden="true"></i>
@@ -55,6 +63,12 @@
   </div>
 
   <div class="mb-3" x-show="job">{{ job_progress("job") }}</div>
+
+  <div class="alert alert-info d-flex align-items-center gap-2" role="status" x-show="ratingsUpdated && !job && Object.keys(cards).length">
+    <i class="ti ti-refresh" aria-hidden="true"></i>
+    <span>Team ratings were just updated with new results.</span>
+    <button type="button" class="btn btn-sm btn-primary ms-auto" @click="run()">Re-run predictions</button>
+  </div>
 
   {#- KPI strip -#}
   <div class="row row-cards mb-3 kpi" x-show="games.length">
@@ -127,8 +141,10 @@
           <div class="card-body">
             {#- status line -#}
             <div class="d-flex align-items-center gap-2 small text-secondary mb-2">
-              <span x-text="r.final ? 'Final' : (r.g.status === 'in' ? 'In progress' : tipoffText(r.g))"></span>
-              <span class="badge bg-red-lt" x-show="r.g.status === 'in'">Live</span>
+              <span class="d-inline-flex align-items-center gap-1" :class="{'text-red fw-semibold': r.g.status === 'in'}">
+                <span class="status-dot status-dot-animated status-red" x-show="r.g.status === 'in'"></span>
+                <span x-text="statusText(r)"></span>
+              </span>
               <span class="ms-auto"></span>
               <span class="badge bg-green text-green-fg" x-show="r.vip" title="≥ 65% and both engines agree">
                 <i class="ti ti-star-filled" aria-hidden="true"></i> VIP</span>
@@ -140,7 +156,9 @@
 
             {#- team rows: away on top, home below -#}
             <template x-for="side in ['away', 'home']" :key="side">
-              <div class="team-row mb-1" :class="{fav: r.favourite && r.favourite.id === r.g[side].id}">
+              <div class="team-row mb-1" :class="{fav: !r.final && r.favourite && r.favourite.id === r.g[side].id,
+                                                  won: r.final && (side === 'home') === (r.g.home.score > r.g.away.score),
+                                                  lost: r.final && (side === 'home') !== (r.g.home.score > r.g.away.score)}">
                 {{ team_badge("r.g[side]") }}
                 <span class="name">
                   <span x-text="r.g[side].name"></span>
@@ -151,7 +169,7 @@
                   </span>
                 </span>
                 <span class="score" x-show="r.final || r.g.status === 'in'" x-text="r.g[side].score ?? ''"></span>
-                <span class="prob" x-text="probText(r, side)"></span>
+                <span class="prob" x-show="r.pHome != null" x-text="probText(r, side)"></span>
               </div>
             </template>
 

@@ -77,7 +77,7 @@ Trong lúc này app tải các mùa 2023-24 đến 2026-27, tính rating cho c�
 
 ## Dùng hằng ngày
 
-**Xem lịch hôm nay:** trang chủ (**Slate**) liệt kê mọi trận trong ngày, tính theo ngày giờ miền Đông Mỹ. Dùng nút ‹ › hoặc phím mũi tên để chuyển ngày. Bấm **Run predictions**, mỗi thẻ trận sẽ hiện dần: % thắng, spread, total, rating hai đội và tỷ lệ của nhà cái. Phía trên có bộ đếm kèo VIP (từ 65% trở lên và hai engine cùng đồng ý) và các kèo có lợi thế (value) so với nhà cái, bấm vào để lọc. Trận đã đá xong được đánh dấu đúng/sai. Bấm vào một thẻ để mở phân tích chi tiết.
+**Xem lịch hôm nay:** trang chủ (**Slate**) liệt kê mọi trận trong ngày, tính theo ngày giờ miền Đông Mỹ. Dùng nút ‹ › hoặc phím mũi tên để chuyển ngày. Bấm **Run predictions**, mỗi thẻ trận sẽ hiện dần: % thắng, spread, total, rating hai đội và tỷ lệ của nhà cái. Phía trên có bộ đếm kèo VIP (từ 65% trở lên và hai engine cùng đồng ý) và các kèo có lợi thế (value) so với nhà cái, bấm vào để lọc. Trận đã đá xong được đánh dấu đúng/sai. Khi có trận đang diễn ra, tỷ số và trạng thái tự cập nhật mỗi phút mà không cần tải lại trang. Bấm vào một thẻ để mở phân tích chi tiết.
 
 **Ratings:** bảng xếp hạng 30 đội theo rating Kalman-Elo (số điểm mạnh hơn đội trung bình, ± độ bất định), thay đổi 7 ngày và đường xu hướng cả mùa. Tab Players hiện mức ảnh hưởng của từng cầu thủ, dùng để tính chấn thương.
 
@@ -92,7 +92,9 @@ Trong lúc này app tải các mùa 2023-24 đến 2026-27, tính rating cho c�
 
 Nếu bạn nhập tỷ lệ cược (moneyline) của nhà cái, app tính thêm lợi thế (edge) và mức cược Kelly đã giới hạn.
 
-**Cập nhật rating sau khi có kết quả mới:** vào trang **Model** và bấm **Grade new games**. App sẽ chấm các trận vừa đá, rồi tính lại rating từ đầu, nên không trận nào bị cộng hai lần.
+**Rating tự cập nhật:** khi app đang chạy, vài giờ sau khi có kết quả mới, app tự tải về và tính lại rating. Các trang đang mở cũng tự tải lại. Muốn cập nhật ngay thì bấm **Update now** ở trang Ratings.
+
+**Cập nhật rating thủ công (cách cũ):** vào trang **Model** và bấm **Grade new games**. App sẽ chấm các trận vừa đá, rồi tính lại rating từ đầu, nên không trận nào bị cộng hai lần.
 
 **Train lại:** khoảng mỗi tuần một lần, hoặc khi thấy dự đoán có vẻ lỗi thời.
 

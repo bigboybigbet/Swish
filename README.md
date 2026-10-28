@@ -114,11 +114,11 @@ Until this has run once, predictions fall back to plain Elo. Seasons roll forwar
 
 ### 5. Today's slate
 
-The home page (**Slate**) lists every game of the day (US Eastern date; ‹ › or the arrow keys move between days). Press **Run predictions**: each card fills in as its game is predicted, with win %, spread, total and both teams' ratings next to the market line. VIP picks (≥ 65% and both engines agree) and value spots against the market are counted at the top and can be filtered; finished games are marked correct or missed. Click a card for the full analysis.
+The home page (**Slate**) lists every game of the day (US Eastern date; ‹ › or the arrow keys move between days). Press **Run predictions**: each card fills in as its game is predicted, with win %, spread, total and both teams' ratings next to the market line. VIP picks (≥ 65% and both engines agree) and value spots against the market are counted at the top and can be filtered; finished games are marked correct or missed. Scores and live/final status refresh by themselves every minute while games are on. Click a card for the full analysis.
 
 ### 6. Ratings and accuracy
 
-**Ratings** ranks all 30 teams by their Kalman-Elo rating (points above an average team, ± its uncertainty) with the 7-day change and the season's path, plus the player impact weights used for injuries. **Accuracy** grades every game of the replayed seasons with the prediction made *before* tip-off: picks correct, log loss, Brier score, a calibration chart, accuracy by confidence and week by week. Both work offline from the ratings Train builds.
+**Ratings** ranks all 30 teams by their Kalman-Elo rating (points above an average team, ± its uncertainty) with the 7-day change and the season's path, plus the player impact weights used for injuries. **Accuracy** grades every game of the replayed seasons with the prediction made *before* tip-off: picks correct, log loss, Brier score, a calibration chart, accuracy by confidence and week by week. Both work offline from the ratings Train builds. While the app runs it keeps the ratings current by itself: a few hours after new results it downloads them and rebuilds the ratings (or press **Update now** on the Ratings page), and the open pages reload.
 
 ### 7. Predict a game
 
@@ -192,4 +192,4 @@ A new model idea goes into `research/variants/<name>.py` (see the docstring in `
 
 ## Data and disclaimer
 
-Game and player statistics come from NBA.com through [`nba_api`](https://github.com/swar/nba_api); injuries, schedules and scores from ESPN's public endpoints; historical research data from [NocturneBear/NBA-Data-2010-2024](https://github.com/NocturneBear/NBA-Data-2010-2024). This project is not affiliated with the NBA, ESPN or any bookmaker. Forecasts are probabilities, not guarantees. Nothing here is betting advice; if you bet, only stake what you can afford to lose.
+Game and player statistics come from NBA.com through [`nba_api`](https://github.com/swar/nba_api); injuries, schedules and scores from ESPN's public endpoints; historical research data from [NocturneBear/NBA-Data-2010-2024](https://github.com/NocturneBear/NBA-Data-2010-2024). Team logos are trademarks of the NBA and its teams; the app does not ship them, your browser loads them from nba.com (colour badges are shown offline). This project is not affiliated with the NBA, ESPN or any bookmaker. Forecasts are probabilities, not guarantees. Nothing here is betting advice; if you bet, only stake what you can afford to lose.

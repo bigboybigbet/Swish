@@ -56,6 +56,17 @@
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .08);
 }
 .team-badge.badge-sm { --nq-badge-size: 1.5rem; }
+.team-logo {
+  --nq-badge-size: 2rem;
+  flex: none;
+  width: var(--nq-badge-size);
+  height: var(--nq-badge-size);
+  object-fit: contain;
+}
+.team-logo.badge-sm { --nq-badge-size: 1.5rem; }
+.team-logo.badge-lg { --nq-badge-size: 3rem; }
+/* dark logos (BKN, SAS…) need a light disc in dark mode */
+[data-bs-theme="dark"] .team-logo { background: rgba(255,255,255,.88); border-radius: 50%; padding: 2px; }
 .team-badge.badge-lg { --nq-badge-size: 3rem; }
 
 /* ── two-colour probability bar ─────────────────────────────────────────── */
@@ -145,3 +156,7 @@
 
 /* Danger zone. */
 .danger-zone .list-group-item { background: transparent; }
+
+/* Alpine's x-show hides with an inline `display: none`, which Bootstrap's
+   `.d-flex` / `.d-inline-flex` (!important) would override. Keep it last. */
+[style*="display: none"] { display: none !important; }

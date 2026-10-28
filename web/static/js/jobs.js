@@ -23,7 +23,7 @@ const EVENT_TYPES = ['progress', 'log', 'item', 'done'];
 
 const LABELS = {
   train: 'Training', autobacktest: 'Auto-backtest', backtest: 'Backtest',
-  scan: 'Slate scan', player_impact: 'Player impact update', ratings: 'Ratings build',
+  scan: 'Slate scan', player_impact: 'Player impact update', ratings: 'Ratings update',
 };
 const RESULT_PAGES = {
   train: '/model', autobacktest: '/accuracy', backtest: '/accuracy', scan: '/',
