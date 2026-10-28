@@ -19,7 +19,7 @@
   .slate-card .prob-split { height: .5rem; }
   .slate-card .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
   .slate-card .tile { background: var(--tblr-bg-surface-secondary); border-radius: var(--tblr-border-radius); padding: .4rem .5rem; }
-  .slate-card .tile .label { font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: var(--tblr-secondary); }
+  .slate-card .tile .label { font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; color: var(--tblr-secondary); }
   .slate-card .tile .val { font-weight: 600; font-variant-numeric: tabular-nums; }
   .slate-card.correct { border-left: 3px solid var(--tblr-green); }
   .slate-card.incorrect { border-left: 3px solid var(--tblr-red); }
@@ -69,6 +69,10 @@
     <span>Team ratings were just updated with new results.</span>
     <button type="button" class="btn btn-sm btn-primary ms-auto" @click="run()">Re-run predictions</button>
   </div>
+
+  {#- one polite, contextual status for screen readers when scores refresh -#}
+  <span class="visually-hidden" role="status" aria-atomic="true"
+        x-text="refreshedAt && polling ? (liveCount ? liveCount + ' games live. ' : '') + 'Scores updated at ' + $fmt.time(refreshedAt) : ''"></span>
 
   {#- KPI strip -#}
   <div class="row row-cards mb-3 kpi" x-show="games.length">

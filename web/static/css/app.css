@@ -1,3 +1,18 @@
+/* ── typography: Fira Sans (vendored, OFL) — built for data-dense UIs ─── */
+@font-face { font-family: "Fira Sans"; font-style: normal; font-display: swap; font-weight: 400;
+  src: url("/static/vendor/@fontsource/fira-sans@5.3.0/fira-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Fira Sans"; font-style: normal; font-display: swap; font-weight: 500;
+  src: url("/static/vendor/@fontsource/fira-sans@5.3.0/fira-sans-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Fira Sans"; font-style: normal; font-display: swap; font-weight: 600;
+  src: url("/static/vendor/@fontsource/fira-sans@5.3.0/fira-sans-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Fira Sans"; font-style: normal; font-display: swap; font-weight: 700;
+  src: url("/static/vendor/@fontsource/fira-sans@5.3.0/fira-sans-latin-700-normal.woff2") format("woff2"); }
+:root {
+  --tblr-font-sans-serif: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --tblr-body-font-family: var(--tblr-font-sans-serif);
+}
+.num, .h1, .h2, .table td { font-variant-numeric: tabular-nums; }
+
 /* Swish app styles. Tabler provides the design system; this file adds
    tokens, the Tabulator <-> Tabler variable mapping and a few components. */
 
@@ -47,7 +62,7 @@
   width: var(--nq-badge-size);
   height: var(--nq-badge-size);
   border-radius: 50%;
-  font-size: calc(var(--nq-badge-size) * .32);
+  font-size: max(.75rem, calc(var(--nq-badge-size) * .32));   /* never under 12 px */
   font-weight: 700;
   letter-spacing: .02em;
   line-height: 1;
@@ -156,6 +171,26 @@
 
 /* Danger zone. */
 .danger-zone .list-group-item { background: transparent; }
+
+/* ── interaction and accessibility (UI/UX Pro Max checklist) ──────────── */
+/* visible keyboard focus on every clickable card and control */
+a.card:focus-visible, .btn:focus-visible, .nav-link:focus-visible, .form-select:focus-visible {
+  outline: 2px solid var(--tblr-primary);
+  outline-offset: 2px;
+}
+a.card { cursor: pointer; }
+/* readable labels: Tabler badges default to ~10.5 px */
+.badge { font-size: max(.75rem, .75em); }
+/* touch screens: 44 px targets for small buttons */
+@media (pointer: coarse) {
+  .btn-sm, .btn-icon { min-height: 44px; min-width: 44px; }
+}
+/* respect "reduce motion": no pulsing dots, lifts or bar slides */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+                           transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  .slate-card:hover { transform: none !important; }
+}
 
 /* Alpine's x-show hides with an inline `display: none`, which Bootstrap's
    `.d-flex` / `.d-inline-flex` (!important) would override. Keep it last. */
