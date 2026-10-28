@@ -68,7 +68,13 @@ export default function register(Alpine) {
     error: null,
     loading: false,
 
-    init() { this.load(); this.$watch('window', () => this.load()); },
+    init() {
+      this.load();
+      this.$watch('window', () => this.load());
+      document.addEventListener('nq:job', ({ detail: d }) => {
+        if (['ratings', 'train', 'autobacktest'].includes(d.kind) && d.type === 'done' && d.data.state === 'done') this.load();
+      });
+    },
 
     async load() {
       this.loading = true;

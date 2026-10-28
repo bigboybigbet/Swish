@@ -23,7 +23,8 @@ from server.services import teams
 
 log = logging.getLogger("server")
 
-SCOREBOARD_TTL_LIVE = 5 * 60
+SCOREBOARD_TTL_LIVE = 30          # a game is in progress: scores move
+SCOREBOARD_TTL_TODAY = 60         # today / unfinished games
 SCOREBOARD_TTL_PAST = 24 * 3600
 INJURY_TTL          = 10 * 60
 INJURY_MAX_STALE    = 24 * 3600
@@ -64,6 +65,15 @@ def _with_ids(ev: dict) -> dict:
     return out
 
 
+def _scoreboard_ttl(d: date, events: list) -> int:
+    """Live games refresh every 30 s; a past date whose games are all final for a day."""
+    if any(ev.get("status") == "in" for ev in events):
+        return SCOREBOARD_TTL_LIVE
+    if d < clock.today_et() and all(ev.get("completed") for ev in events):
+        return SCOREBOARD_TTL_PAST
+    return SCOREBOARD_TTL_TODAY
+
+
 def scoreboard(d: date) -> dict:
     """{date, as_of, stale, events:[…]} for an ET date (see data.schedule.parse_scoreboard)."""
     key = f"web:espn_scoreboard:{d:%Y%m%d}"
@@ -83,7 +93,7 @@ def scoreboard(d: date) -> dict:
             log.warning("ESPN scoreboard offline, serving cached copy for %s", d)
             stale = True
         else:
-            ttl = SCOREBOARD_TTL_PAST if d < clock.today_et() else SCOREBOARD_TTL_LIVE
+            ttl = _scoreboard_ttl(d, events)
             _cache.set(key, events, ttl)
             hit = (events, time.time())
     events, stored_at = hit

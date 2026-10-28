@@ -116,6 +116,20 @@ Alpine.store('banners', {
   },
 });
 
+// Team logos come from the NBA's CDN, loaded by the browser (nothing is stored
+// in the repo). A logo that fails (offline, blocked) falls back to the colour
+// badge for the rest of the session.
+Alpine.store('logos', {
+  enabled: Alpine.$persist(true).as('swish-logos'),
+  failed: {},
+  url(team) {
+    const id = team?.id;
+    if (!this.enabled || !id || this.failed[id]) return null;
+    return `https://cdn.nba.com/logos/nba/${id}/primary/L/logo.svg`;
+  },
+  fail(team) { if (team?.id) this.failed[team.id] = true; },
+});
+
 Alpine.store('teams', {
   list: [],
   byId: {},
@@ -148,6 +162,7 @@ registerJobs(Alpine);
 // ── magics: $fmt.pct(p), $teamStyle(team), $teamColors(home, away) ───────
 
 Alpine.magic('fmt', () => fmt);
+Alpine.magic('teamLogo', () => (team) => Alpine.store('logos').url(team));
 Alpine.magic('teamStyle', () => (team) => badgeStyle(Alpine.store('teams').byId[team?.id] || team));
 Alpine.magic('teamColors', () => (home, away) => {
   const byId = Alpine.store('teams').byId;

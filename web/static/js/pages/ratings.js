@@ -25,6 +25,7 @@ export default function register(Alpine) {
     error: null,
     query: '',
     maxAbs: 1,
+    jobId: null,
 
     async init() {
       const hash = location.hash.replace('#', '');
@@ -35,7 +36,24 @@ export default function register(Alpine) {
         if (t === 'players' && !this.players) this.loadPlayers();
       });
       if (this.tab === 'players') this.loadPlayers();
+      document.addEventListener('nq:job', ({ detail: d }) => {
+        if (d.kind === 'ratings' && !this.jobId) this.jobId = d.id;
+        if (['ratings', 'train', 'autobacktest'].includes(d.kind) && d.type === 'done') {
+          if (d.id === this.jobId) this.jobId = null;
+          if (d.data.state === 'done') this.loadTeams();
+        }
+      });
     },
+
+    async update() {
+      try {
+        const job = await Alpine.store('jobs').start('ratings', {});
+        this.jobId = job.id;
+      } catch (e) {
+        Alpine.store('toasts')?.push?.({ kind: 'danger', title: 'Could not start the update', body: e.message });
+      }
+    },
+    get job() { return this.jobId ? Alpine.store('jobs').get(this.jobId) : null; },
 
     async loadTeams() {
       this.error = null;

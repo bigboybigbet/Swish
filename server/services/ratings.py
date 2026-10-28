@@ -7,13 +7,22 @@ the ratings *before* that game.  The logistic map (two numbers) was fitted on
 the same seasons, a negligible in-sample effect next to the ratings, which
 never see the game they predict.
 """
-from datetime import date, timedelta
+import logging
+import threading
+import time
+from datetime import date, datetime, timedelta
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict
 
 from engine import team_strength
+from server import clock, jobs
 from server.errors import ApiError
 from server.services import teams
+
+log = logging.getLogger(__name__)
+AUTO_REFRESH_EVERY_S = 30 * 60        # how often the server checks
+AUTO_REFRESH_MIN_AGE_H = 3            # never rebuild more often than this
 
 EPOCH = date(2000, 1, 1)
 TIERS = ((0.65, "high"), (0.55, "medium"), (0.0, "low"))
@@ -144,3 +153,53 @@ def accuracy(window: str = "season") -> dict:
         "margin_mae": round(float(np.abs(m - np.array([g[5] for g in games])).mean()), 2),
         "calibration": calib, "tiers": tiers, "trend": trend,
     }
+
+
+# ── ratings update job (no XGBoost model needed) ──────────────────────────────
+
+class NoParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def run_ratings(ctx: jobs.JobContext):
+    if clock.is_demo():
+        raise RuntimeError("Ratings update needs stats.nba.com, so it is not available in demo mode.")
+    ctx.progress(progress=None, stage="Downloading game logs from stats.nba.com")
+    st = team_strength.refresh(status_cb=ctx.log)
+    if st is None:
+        raise RuntimeError("Could not download the game logs (check the connection to stats.nba.com).")
+    return {"last_game_date": st["last_game_date"], "n_games": st["n_games"], "season": st["season"]}
+
+
+jobs.register_kind(jobs.JobKind("ratings", run_ratings, writer=True, params=NoParams,
+                                label="Ratings update"))
+
+
+def ratings_stale(st: dict | None, today: date | None = None, now: datetime | None = None) -> bool:
+    """True when finished games are probably missing: no state, or nothing from
+    yesterday (ET) yet and the last rebuild is AUTO_REFRESH_MIN_AGE_H old."""
+    if not st:
+        return True
+    today = today or clock.today_et()
+    if date.fromisoformat(st["last_game_date"]) >= today - timedelta(days=1):
+        return False
+    built = datetime.fromisoformat(st["built_at"]) if st.get("built_at") else datetime.min
+    return (now or datetime.now()) - built >= timedelta(hours=AUTO_REFRESH_MIN_AGE_H)
+
+
+def _auto_refresh_loop():
+    time.sleep(15)                                   # let the server finish starting
+    while True:
+        try:
+            if ratings_stale(team_strength.get_state()):
+                jobs.manager().submit("ratings", {})
+                log.info("Ratings are behind: started an automatic update")
+        except ApiError:
+            pass                                     # another writer job is running
+        except Exception:                            # noqa: BLE001
+            log.exception("Automatic ratings check failed")
+        time.sleep(AUTO_REFRESH_EVERY_S)
+
+
+def start_auto_refresh():
+    threading.Thread(target=_auto_refresh_loop, name="ratings-auto-refresh", daemon=True).start()

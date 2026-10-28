@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import page_header, empty_state, skeleton_rows, team_badge %}
+{% from "_macros.html" import page_header, empty_state, skeleton_rows, team_badge, job_progress %}
 
 {% block page_module %}/static/js/pages/ratings.js{% endblock %}
 
@@ -32,6 +32,15 @@
 
   {#- teams -#}
   <div x-show="tab === 'teams'">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <span class="small text-secondary" x-show="teams?.built_at"
+            x-text="'Updated ' + $fmt.ago(teams?.built_at) + ' · ratings update by themselves after new results'"></span>
+      <button type="button" class="btn btn-sm btn-outline-primary ms-auto" @click="update()"
+              :disabled="!!job || $store.status.demoDate" :title="$store.status.demoDate ? 'Not available in demo mode' : 'Download the latest results now'">
+        <i class="ti ti-refresh me-1" aria-hidden="true"></i>Update now
+      </button>
+    </div>
+    <div class="mb-3" x-show="job">{{ job_progress("job") }}</div>
     <p class="text-secondary">
       Kalman-Elo rating: points better than an average team on a neutral floor, with ± one standard deviation of
       uncertainty. Home court adds about 2.5 points. A 5-point gap is roughly a 65–35 game.

@@ -6,6 +6,8 @@ import { api } from '../api.js';
 import { fmt } from '../format.js';
 
 const FILTERS = ['all', 'vip', 'value', 'conflict'];
+const POLL_MS = 60_000;                                    // the server caches live scoreboards for 30 s
+const RATING_JOBS = ['ratings', 'train', 'autobacktest'];
 
 export default function register(Alpine) {
   Alpine.data('slatePage', () => ({
@@ -21,6 +23,9 @@ export default function register(Alpine) {
     filter: 'all',
     sort: 'tipoff',
     filters: FILTERS,
+    polling: false,
+    refreshedAt: null,
+    ratingsUpdated: false,
 
     init() {
       const fromUrl = new URLSearchParams(location.search).get('date');
@@ -29,6 +34,8 @@ export default function register(Alpine) {
       if (fromUrl || Alpine.store('status').data) start();
       else document.addEventListener('nq:status', start, { once: true });
       document.addEventListener('nq:job', (e) => this.onJob(e.detail));
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && this.polling) this.poll(); });
+      setInterval(() => { if (this.polling && !document.hidden) this.poll(); }, POLL_MS);
       window.addEventListener('keydown', (e) => {
         if (e.target.closest('input, select, textarea')) return;
         if (e.key === 'ArrowLeft') this.shift(-1);
@@ -51,6 +58,8 @@ export default function register(Alpine) {
         this.games = s.games;
         this.asOf = s.as_of;
         this.stale = s.stale;
+        this.refreshedAt = new Date().toISOString();
+        this.updatePolling();
       } catch (e) {
         this.games = [];
         this.error = e.message || 'Could not load the schedule.';
@@ -62,6 +71,28 @@ export default function register(Alpine) {
         for (const c of scan.games) this.cards[c.event_id] = c;
         this.scanAt = scan.created_at;
       } catch { /* no scan yet for this date */ }
+    },
+
+    /** Poll while the date is today or yesterday (ET) and a game is not final yet. */
+    updatePolling() {
+      const today = Alpine.store('status').todayEt;
+      const recent = this.date >= fmt.addDays(today, -1) && this.date <= today;
+      this.polling = recent && this.games.some((g) => !g.completed);
+    },
+    get liveCount() { return this.games.filter((g) => g.status === 'in').length; },
+
+    /** Refresh scores and status in place; predictions stay as they are. */
+    async poll() {
+      try {
+        const s = await api.get('/api/schedule', { date: this.date });
+        if (s.date !== this.date) return;
+        const byId = Object.fromEntries(s.games.map((g) => [g.event_id, g]));
+        this.games = this.games.map((g) => (byId[g.event_id] ? { ...g, ...byId[g.event_id] } : g));
+        this.asOf = s.as_of;
+        this.stale = s.stale;
+        this.refreshedAt = new Date().toISOString();
+        this.updatePolling();
+      } catch { /* keep the last scores; the next poll retries */ }
     },
 
     shift(n) { this.go(fmt.addDays(this.date, n)); },
@@ -83,12 +114,14 @@ export default function register(Alpine) {
     get job() { return this.jobId ? Alpine.store('jobs').get(this.jobId) : null; },
 
     onJob({ id, kind, type, data }) {
+      if (RATING_JOBS.includes(kind) && type === 'done' && data.state === 'done') this.ratingsUpdated = true;
       if (kind !== 'scan') return;
       if (!this.jobId) this.jobId = id;
       if (id !== this.jobId) return;
       if (type === 'item' && data?.data?.event_id) this.cards[data.data.event_id] = data.data;
       if (type === 'done') {
         this.jobId = null;
+        this.ratingsUpdated = false;
         if (data.state === 'done') this.scanAt = new Date().toISOString();
       }
     },
@@ -150,6 +183,11 @@ export default function register(Alpine) {
       return s == null ? null : fmt.spread(r.g.home.abbr, r.g.away.abbr, s);
     },
     /** "07:00 Sat 16 Mar · 19:00 ET": local time first (the user may be in Asia). */
+    statusText(r) {
+      if (r.final) return 'Final';
+      if (r.g.status === 'in') return r.g.period > 4 ? `OT${r.g.period > 5 ? r.g.period - 4 : ''}` : `Q${r.g.period || 1}`;
+      return this.tipoffText(r.g);
+    },
     tipoffText(g) {
       const t = fmt.tipoff(g.tipoff_utc);
       return t.local === fmt.DASH ? 'Time TBD' : `${t.local} ${t.localDay} · ${t.et}`;
