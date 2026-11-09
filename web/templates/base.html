@@ -7,6 +7,8 @@
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}{{ page_label(page) }}{% endblock %} · Swish</title>
   <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+  <meta name="theme-color" content="#0b1220">
   <link rel="stylesheet" href="/static/vendor/@tabler/core@1.6.1/tabler.min.css">
   <link rel="stylesheet" href="/static/vendor/@tabler/icons-webfont@3.49.0/tabler-icons.min.css">
   <link rel="stylesheet" href="/static/vendor/tabulator-tables@6.6.1/tabulator_bootstrap5.min.css">
@@ -20,6 +22,8 @@
    "echarts":"/static/vendor/echarts@6.1.0/echarts.esm.min.mjs",
    "tabulator-tables":"/static/vendor/tabulator-tables@6.6.1/tabulator_esm.min.mjs"}}</script>
   <script type="module" src="/static/js/main.js"></script>
+  {#- Smooth navigation: prerender a page as soon as its link is hovered (Chromium). -#}
+  <script type="speculationrules">{"prerender":[{"where":{"selector_matches":"a.nav-link, a.navbar-brand, a.slate-card"},"eagerness":"moderate"}]}</script>
   {#- CDN fallback (needs internet). The vendored copies above are the default;
       the sha384 values are the same as in web/vendor.lock.json.
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.6.1/dist/css/tabler.min.css" integrity="sha384-tT2UAGE9hxG/p5d0iGIvZ/s8El3nWWG3tfG02i8iOY5Pbf8cZZRVmcrrVs+JG5Vw" crossorigin="anonymous">
@@ -44,14 +48,14 @@
 <a href="#main" class="visually-hidden-focusable btn btn-primary position-absolute m-2 skip-link">Skip to content</a>
 <div class="page">
 
-  <header class="navbar navbar-expand-lg d-print-none sticky-top" x-data>
+  <header class="navbar navbar-expand-lg d-print-none sticky-top brand-bar" data-bs-theme="dark" x-data>
     <div class="container-xl">
       <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#nav-offcanvas"
               aria-controls="nav-offcanvas" aria-label="Open menu">
         <span class="navbar-toggler-icon"></span>
       </button>
       <a href="/" class="navbar-brand navbar-brand-autodark pe-0 pe-lg-3 gap-2 text-reset text-decoration-none">
-        <i class="ti ti-ball-basketball fs-1" aria-hidden="true"></i><span>Swish</span>
+        <img src="/static/img/favicon.svg" width="30" height="30" alt="" class="brand-mark"><span class="brand-word">Swish</span>
       </a>
 
       <div class="navbar-nav flex-row order-lg-last align-items-center nav-tools">
@@ -123,7 +127,7 @@
       <div class="offcanvas offcanvas-start" tabindex="-1" id="nav-offcanvas" aria-labelledby="nav-offcanvas-title">
         <div class="offcanvas-header">
           <h2 class="offcanvas-title" id="nav-offcanvas-title">
-            <i class="ti ti-ball-basketball text-orange" aria-hidden="true"></i> Swish
+            <img src="/static/img/favicon.svg" width="24" height="24" alt="" class="brand-mark me-1"> Swish
           </h2>
           <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close menu"></button>
         </div>
@@ -153,6 +157,7 @@
   </header>
 
   <div class="page-wrapper">
+    {% block page_header %}{% endblock %}
     <div class="container-xl shell-banners" x-data>
       {#- x-show sets inline display:none, which Bootstrap's d-* utilities (!important)
           would override: keep d-flex on an inner wrapper, never next to x-show. #}
@@ -190,7 +195,6 @@
       </div>
     </div>
 
-    {% block page_header %}{% endblock %}
 
     <main id="main" class="page-body" tabindex="-1">
       <div class="container-xl">
@@ -203,6 +207,7 @@
         <div class="row g-2 align-items-start small text-secondary">
           <div class="col-12 col-lg footer-note">
             <div>Not affiliated with the NBA. Team logos are trademarks of the NBA and its teams, loaded from nba.com.</div>
+            <div>Photos (Wikimedia Commons, cropped): "Capital One Arena interior 2017-04-19" by Daniel Lobo, CC0; "Lakers NBA Cup court 2024" by Troutfarm27, CC BY 4.0. See docs/CREDITS.md.</div>
             <div>Forecasts are probabilities, not guarantees, and not betting advice. If you bet, only stake what you can afford to lose.</div>
           </div>
           <div class="col-12 col-lg-auto text-lg-end">

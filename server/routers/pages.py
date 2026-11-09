@@ -17,6 +17,7 @@ ORDER = 1000
 PAGES = {
     "slate":    "/",
     "game":     "/game",
+    "news":     "/news",
     "ratings":  "/ratings",
     "accuracy": "/accuracy",
     "bets":     "/bets",
@@ -42,6 +43,13 @@ def _page_route(page: str):
 for _page, _path in PAGES.items():
     router.add_api_route(_path, _page_route(_page), methods=["GET"],
                          response_class=HTMLResponse)
+
+
+@router.get("/recap", response_class=HTMLResponse)
+def page_recap(request: Request) -> HTMLResponse:
+    """Finished or live game in depth (opened from a Slate card; not in the nav)."""
+    return request.app.state.templates.TemplateResponse(
+        request, "recap.html", {"page": "recap", "version": __version__})
 
 
 @router.get("/favicon.ico")

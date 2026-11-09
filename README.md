@@ -116,7 +116,13 @@ Until this has run once, predictions fall back to plain Elo. Seasons roll forwar
 
 The home page (**Slate**) lists every game of the day (US Eastern date; ‹ › or the arrow keys move between days). Press **Run predictions**: each card fills in as its game is predicted, with win %, spread, total and both teams' ratings next to the market line. VIP picks (≥ 65% and both engines agree) and value spots against the market are counted at the top and can be filtered; finished games are marked correct or missed. Scores and live/final status refresh by themselves every minute while games are on. Click a card for the full analysis.
 
-### 6. Ratings and accuracy
+### 6. Game recaps and news
+
+Click a finished or live game on the Slate for its **recap**, built from ESPN's play-by-play: the game flow (score margin with the win probability after every play, the biggest swings marked), key moments (win-probability swings, scoring runs, clutch baskets, lead changes), each player's impact (win chance added and Game Score), the rotation (who was on the floor when, rebuilt from every substitution), team stats, the box score, the injury report and related news. Live games refresh every 30 seconds.
+
+**News** collects ESPN's NBA headlines, tags each one by team and kind, flags the ones that change who plays (injuries, rest, suspensions) and puts tonight's teams first. The Game page shows the news for both teams.
+
+### 6b. Ratings and accuracy
 
 **Ratings** ranks all 30 teams by their Kalman-Elo rating (points above an average team, ± its uncertainty) with the 7-day change and the season's path, plus the player impact weights used for injuries. **Accuracy** grades every game of the replayed seasons with the prediction made *before* tip-off: picks correct, log loss, Brier score, a calibration chart, accuracy by confidence and week by week. Both work offline from the ratings Train builds. While the app runs it keeps the ratings current by itself: a few hours after new results it downloads them and rebuilds the ratings (or press **Update now** on the Ratings page), and the open pages reload.
 

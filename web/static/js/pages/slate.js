@@ -199,6 +199,10 @@ export default function register(Alpine) {
       return `${side === 'home' ? home : 100 - home}%`;
     },
     gameHref(g) {
+      // finished or live games open the recap (ESPN play-by-play); not in demo mode
+      if ((g.completed || g.status === 'in') && g.event_id && !Alpine.store('status').demoDate) {
+        return `/recap?event=${g.event_id}`;
+      }
       return `/game?home_id=${g.home.id}&away_id=${g.away.id}&date=${this.date}`;
     },
   }));

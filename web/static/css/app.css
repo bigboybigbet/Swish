@@ -179,6 +179,8 @@ a.card:focus-visible, .btn:focus-visible, .nav-link:focus-visible, .form-select:
   outline-offset: 2px;
 }
 a.card { cursor: pointer; }
+.brand-mark { border-radius: 22%; flex: none; }
+.brand-word { font-weight: 700; letter-spacing: -.01em; }
 /* readable labels: Tabler badges default to ~10.5 px */
 .badge { font-size: max(.75rem, .75em); }
 /* touch screens: 44 px targets for small buttons */
@@ -190,6 +192,38 @@ a.card { cursor: pointer; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important;
                            transition-duration: .01ms !important; scroll-behavior: auto !important; }
   .slate-card:hover { transform: none !important; }
+}
+
+/* ── brand shell ─────────────────────────────────────────────────────── */
+.brand-bar { background: #0b1220 !important; border-bottom: 0; view-transition-name: site-nav; }
+.brand-bar .nav-link { color: rgba(255,255,255,.78); }
+.brand-bar .nav-link:hover, .brand-bar .nav-item.active .nav-link { color: #fff; }
+.brand-bar .navbar-nav .nav-item.active .nav-link::after { border-color: #f97316 !important; }
+
+/* photo band under the navbar: real arena picture, flat navy scrim, white type */
+.page-band {
+  position: relative; isolation: isolate; color: #fff;
+  background: #0b1220 var(--band-sm) center 60% / cover no-repeat;
+  padding: 2.75rem 0 1.75rem; margin-bottom: 1.5rem;
+}
+@media (min-width: 768px) { .page-band { background-image: var(--band-lg); padding: 3.75rem 0 2.25rem; } }
+.page-band::before { content: ""; position: absolute; inset: 0; z-index: -1; background: rgba(11, 18, 32, .74); }
+.page-band-title { font-size: clamp(1.75rem, 3.2vw, 2.6rem); font-weight: 700; letter-spacing: -.02em; line-height: 1.05; margin: 0; color: #fff; }
+.page-band-sub { margin: .5rem 0 0; font-size: 1rem; color: rgba(255,255,255,.82); max-width: 46rem; }
+
+/* ── smooth: page transitions and staggered entrances ───────────────────── */
+@view-transition { navigation: auto; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 180ms; }
+@keyframes nq-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.page-body .row-cards > *, .page-body .card { animation: nq-rise .38s cubic-bezier(.2, .7, .2, 1) both; }
+.page-body .row-cards > :nth-child(2) { animation-delay: 60ms; }
+.page-body .row-cards > :nth-child(3) { animation-delay: 120ms; }
+.page-body .row-cards > :nth-child(4) { animation-delay: 180ms; }
+.page-body .row-cards > :nth-child(5) { animation-delay: 230ms; }
+.page-body .row-cards > :nth-child(n+6) { animation-delay: 270ms; }
+.page-body .row-cards .card { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
 
 /* Alpine's x-show hides with an inline `display: none`, which Bootstrap's
