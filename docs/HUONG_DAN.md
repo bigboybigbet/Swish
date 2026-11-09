@@ -79,6 +79,10 @@ Trong lúc này app tải các mùa 2023-24 đến 2026-27, tính rating cho c�
 
 **Xem lịch hôm nay:** trang chủ (**Slate**) liệt kê mọi trận trong ngày, tính theo ngày giờ miền Đông Mỹ. Dùng nút ‹ › hoặc phím mũi tên để chuyển ngày. Bấm **Run predictions**, mỗi thẻ trận sẽ hiện dần: % thắng, spread, total, rating hai đội và tỷ lệ của nhà cái. Phía trên có bộ đếm kèo VIP (từ 65% trở lên và hai engine cùng đồng ý) và các kèo có lợi thế (value) so với nhà cái, bấm vào để lọc. Trận đã đá xong được đánh dấu đúng/sai. Khi có trận đang diễn ra, tỷ số và trạng thái tự cập nhật mỗi phút mà không cần tải lại trang. Bấm vào một thẻ để mở phân tích chi tiết.
 
+**Recap trận đấu:** bấm vào một trận đã đá hoặc đang đá trên Slate. Trang Recap có: diễn biến tỷ số kèm xác suất thắng sau từng tình huống, các tình huống then chốt (bước ngoặt xác suất, chuỗi ghi điểm, tình huống clutch), mức ảnh hưởng của từng cầu thủ, rotation (ai trên sân lúc nào), so sánh chỉ số hai đội, box score, chấn thương và tin liên quan. Trận đang đá tự cập nhật mỗi 30 giây.
+
+**News:** tin NBA từ ESPN được gắn đội và phân loại. Tin ảnh hưởng tới việc ai ra sân (chấn thương, cho nghỉ, treo giò) được đánh dấu đỏ, và tin về các đội đá hôm nay được xếp lên đầu. Trang Game cũng hiện tin của hai đội.
+
 **Ratings:** bảng xếp hạng 30 đội theo rating Kalman-Elo (số điểm mạnh hơn đội trung bình, ± độ bất định), thay đổi 7 ngày và đường xu hướng cả mùa. Tab Players hiện mức ảnh hưởng của từng cầu thủ, dùng để tính chấn thương.
 
 **Accuracy:** chấm điểm mọi trận bằng dự đoán đưa ra *trước* giờ bóng lăn: tỷ lệ đoán đúng, log loss, Brier, biểu đồ calibration (model nói 70% thì đội đó có thắng khoảng 70% không), tỷ lệ đúng theo mức tự tin và theo từng tuần.

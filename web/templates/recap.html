@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% from "_macros.html" import page_header, team_badge, skeleton %}
+
+{% block page_module %}/static/js/pages/recap.js{% endblock %}
+
+{% block head %}
+<style>
+  .recap-hero .score { font-size: 3rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .recap-hero .loser { opacity: .55; }
+  .recap-hero .team-side { padding: .75rem 1.25rem .75rem 1rem; border-radius: var(--tblr-border-radius-lg);
+    background: color-mix(in srgb, var(--team) 12%, transparent); box-shadow: inset 5px 0 0 var(--team); }
+  .recap-hero .team-side .score { color: var(--team); }
+  [data-bs-theme="dark"] .recap-hero .team-side .score { color: color-mix(in srgb, var(--team) 55%, white); }
+  .chart-box { height: 340px; width: 100%; }
+  .chart-box.rotation { height: 430px; }
+  .chart-box.impact { height: 380px; }
+  .stat-bar { display: flex; height: .4rem; border-radius: 1rem; overflow: hidden; background: var(--tblr-bg-surface-secondary); }
+  .stat-row .better { font-weight: 700; }
+  .moment { border-left: 3px solid var(--tblr-border-color); padding-left: .75rem; }
+  .moment.swing { border-color: var(--tblr-orange); }
+  .moment.run { border-color: var(--tblr-red); }
+  .moment.clutch { border-color: var(--tblr-purple); }
+  .box-table td, .box-table th { white-space: nowrap; padding: .35rem .5rem; }
+  .news-card img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--tblr-border-radius); }
+</style>
+{% endblock %}
+
+{% block page_header %}{{ page_header("Game recap", image="arena-court", sub="How the game was won: flow, rotations, impact and the moments that decided it.") }}{% endblock %}
+
+{% block content %}
+<div x-data="recapPage" x-cloak>
+  <div class="alert alert-warning" x-show="error" role="alert">
+    <span x-text="error?.message"></span> <a href="/" class="alert-link ms-1">Back to Slate</a>
+  </div>
+  <template x-if="!r && !error">{{ skeleton(3) }}</template>
+
+  <template x-if="r">
+  <div>
+    {#- hero: final score, line scores, what the model said -#}
+    <div class="card recap-hero mb-3">
+      <div class="card-body">
+        <div class="d-flex flex-wrap align-items-center gap-4">
+          <template x-for="side in ['away', 'home']" :key="side">
+            <div class="d-flex align-items-center gap-3 team-side" :class="{loser: r.status.completed && winner !== side}"
+                 :style="{'--team': colors[side]}">
+              {{ team_badge("r[side]", "badge-lg") }}
+              <div>
+                <div class="text-secondary small" x-text="side === 'home' ? 'Home' : 'Away'"></div>
+                <div class="fw-bold" x-text="r[side].name"></div>
+              </div>
+              <div class="score" x-text="r[side].score"></div>
+            </div>
+          </template>
+          <div class="ms-auto text-end">
+            <div class="badge" :class="r.status.completed ? 'bg-secondary-lt' : 'bg-red-lt'" x-text="r.status.detail"></div>
+            <div class="small text-secondary mt-1" x-text="tipoff()"></div>
+          </div>
+        </div>
+
+        <div class="row mt-3 g-3">
+          <div class="col-md-6">
+            <table class="table table-sm mb-0">
+              <thead><tr><th></th><template x-for="q in quarters" :key="q"><th class="text-center" x-text="periodLabel(q)"></th></template><th class="text-center">T</th></tr></thead>
+              <tbody>
+                <template x-for="side in ['away', 'home']" :key="side">
+                  <tr><td class="fw-semibold" x-text="r[side].abbr"></td>
+                    <template x-for="(v, i) in r[side].linescores" :key="i"><td class="text-center num" x-text="v"></td></template>
+                    <td class="text-center num fw-bold" x-text="r[side].score"></td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="col-md-6">
+            <div class="row g-2 text-center">
+              <div class="col-4"><div class="text-secondary small">Lead changes</div><div class="h2 mb-0" x-text="r.moments.lead_changes"></div></div>
+              <div class="col-4"><div class="text-secondary small">Times tied</div><div class="h2 mb-0" x-text="r.moments.times_tied"></div></div>
+              <div class="col-4"><div class="text-secondary small">Largest lead</div>
+                <div class="h2 mb-0" x-text="r.moments.largest_lead.home >= r.moments.largest_lead.away ? r.home.abbr + ' ' + r.moments.largest_lead.home : r.away.abbr + ' ' + r.moments.largest_lead.away"></div></div>
+            </div>
+            <div class="mt-3 small" x-show="r.pregame">
+              <span class="text-secondary">Swish before tip-off:</span>
+              <strong x-text="r.pregame ? r[r.pregame.pick].abbr + ' ' + $fmt.pct(r.pregame.pick === 'home' ? r.pregame.p_home : 1 - r.pregame.p_home) : ''"></strong>
+              <span class="text-secondary" x-text="r.pregame ? '(spread ' + $fmt.spread(r.home.abbr, r.away.abbr, -r.pregame.exp_margin) + ')' : ''"></span>
+              <span class="badge ms-1" x-show="r.pregame && r.pregame.correct != null"
+                    :class="r.pregame?.correct ? 'bg-green-lt' : 'bg-red-lt'" x-text="r.pregame?.correct ? 'Correct' : 'Missed'"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {#- game flow -#}
+    <div class="card mb-3">
+      <div class="card-header"><h3 class="card-title">Game flow</h3>
+        <span class="card-subtitle ms-2 small text-secondary">Score margin play by play, with the home team's win probability. Orange dots: the biggest swings.</span></div>
+      <div class="card-body"><div class="chart-box" x-data="recapChart('flow')" role="img" :aria-label="'Game flow of ' + r.away.abbr + ' at ' + r.home.abbr"></div></div>
+    </div>
+
+    <div class="row row-cards mb-3">
+      {#- key moments -#}
+      <div class="col-lg-5">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title">Key moments</h3>
+            <div class="ms-auto btn-group btn-group-sm" role="group" aria-label="Moment type">
+              <template x-for="k in [['all','All'],['swing','Swings'],['run','Runs'],['clutch','Clutch']]" :key="k[0]">
+                <button type="button" class="btn" :class="momentFilter === k[0] ? 'btn-primary' : 'btn-outline-secondary'" @click="momentFilter = k[0]" x-text="k[1]"></button>
+              </template>
+            </div>
+          </div>
+          <div class="card-body overflow-auto" style="max-height: 430px">
+            <template x-for="(m, i) in moments" :key="i">
+              <div class="moment mb-3" :class="m.kind">
+                <div class="d-flex align-items-center gap-2 small text-secondary">
+                  <i class="ti" :class="momentIcon(m.kind)" aria-hidden="true"></i>
+                  <span x-text="periodLabel(m.period) + ' ' + m.clock"></span>
+                  <span class="ms-auto num" x-text="r.away.abbr + ' ' + m.away + ' – ' + m.home + ' ' + r.home.abbr"></span>
+                </div>
+                <div class="fw-semibold" x-text="m.title"></div>
+                <div class="small" x-text="m.detail"></div>
+              </div>
+            </template>
+            <div class="text-secondary" x-show="!moments.length">Nothing of this kind in this game.</div>
+          </div>
+        </div>
+      </div>
+      {#- player impact -#}
+      <div class="col-lg-7">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title">Player impact</h3>
+            <span class="card-subtitle ms-2 small text-secondary">Win chance added: how much each player's plays moved his team's chance to win.</span></div>
+          <div class="card-body"><div class="chart-box impact" x-data="recapChart('impact')" role="img" aria-label="Player impact"></div></div>
+        </div>
+      </div>
+    </div>
+
+    {#- rotation -#}
+    <div class="card mb-3">
+      <div class="card-header"><h3 class="card-title">Rotation</h3>
+        <span class="card-subtitle ms-2 small text-secondary">Who was on the floor, rebuilt from every substitution.</span>
+        <div class="ms-auto btn-group btn-group-sm" role="group" aria-label="Team">
+          <template x-for="side in ['away', 'home']" :key="side">
+            <button type="button" class="btn" :class="rotationSide === side ? 'btn-primary' : 'btn-outline-secondary'" @click="rotationSide = side" x-text="r[side].abbr"></button>
+          </template>
+        </div>
+      </div>
+      <div class="card-body"><div class="chart-box rotation" x-data="recapChart('rotation')" role="img" aria-label="Rotation chart"></div></div>
+    </div>
+
+    <div class="row row-cards mb-3">
+      {#- team comparison -#}
+      <div class="col-lg-5">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title">Team stats</h3></div>
+          <div class="card-body">
+            <div class="d-flex justify-content-between small fw-semibold mb-2"><span x-text="r.away.abbr"></span><span x-text="r.home.abbr"></span></div>
+            <template x-for="row in statRows()" :key="row.label">
+              <div class="stat-row mb-2">
+                <div class="d-flex justify-content-between small">
+                  <span class="num" :class="{better: row.better === 'away'}" x-text="row.away"></span>
+                  <span class="text-secondary" x-text="row.label"></span>
+                  <span class="num" :class="{better: row.better === 'home'}" x-text="row.home"></span>
+                </div>
+                <div class="stat-bar"><div :style="{width: row.awayPct + '%', background: colors.away}"></div><div :style="{width: row.homePct + '%', background: colors.home}"></div></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+      {#- box score -#}
+      <div class="col-lg-7">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title">Box score</h3>
+            <div class="ms-auto btn-group btn-group-sm" role="group" aria-label="Team">
+              <template x-for="side in ['away', 'home']" :key="side">
+                <button type="button" class="btn" :class="boxSide === side ? 'btn-primary' : 'btn-outline-secondary'" @click="boxSide = side" x-text="r[side].abbr"></button>
+              </template>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover card-table box-table">
+              <thead><tr><th>Player</th><th class="text-end">MIN</th><th class="text-end">PTS</th><th class="text-end">REB</th><th class="text-end">AST</th>
+                <th class="text-end">FG</th><th class="text-end">3PT</th><th class="text-end">+/-</th><th class="text-end" title="Game Score">GmSc</th><th class="text-end" title="Win chance added">WPA</th></tr></thead>
+              <tbody>
+                <template x-for="p in box" :key="p.id">
+                  <tr :class="{'text-secondary': p.dnp}">
+                    <td><span x-text="p.short || p.name"></span><span class="badge bg-secondary-lt ms-1" x-show="p.starter">S</span></td>
+                    <template x-if="p.dnp"><td colspan="9" class="small" x-text="p.reason || 'Did not play'"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num" x-text="p.min"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num fw-semibold" x-text="p.pts"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num" x-text="p.reb"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num" x-text="p.ast"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num" x-text="p.fg"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num" x-text="p.fg3"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num" :class="p.pm > 0 ? 'text-green' : (p.pm < 0 ? 'text-red' : '')" x-text="$fmt.signed(p.pm, 0)"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num" x-text="p.game_score"></td></template>
+                    <template x-if="!p.dnp"><td class="text-end num" :class="p.wpa > 0 ? 'text-green' : (p.wpa < 0 ? 'text-red' : '')" x-text="$fmt.signed(p.wpa * 100, 1)"></td></template>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {#- injuries and news -#}
+    <div class="row row-cards">
+      <div class="col-lg-4" x-show="r.injuries.length">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title">Injury report</h3></div>
+          <div class="list-group list-group-flush">
+            <template x-for="(i, k) in r.injuries" :key="k">
+              <div class="list-group-item">
+                <div class="d-flex"><strong x-text="i.player"></strong><span class="ms-auto badge bg-red-lt" x-text="i.status"></span></div>
+                <div class="small text-secondary" x-text="i.team + (i.detail ? ' · ' + i.detail : '')"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div :class="r.injuries.length ? 'col-lg-8' : 'col-12'" x-show="r.news.length">
+        <div class="card h-100">
+          <div class="card-header"><h3 class="card-title">Related news</h3></div>
+          <div class="card-body"><div class="row g-3">
+            <template x-for="(a, k) in r.news" :key="k">
+              <div class="col-md-6"><a class="text-reset text-decoration-none d-block news-card" :href="a.url" target="_blank" rel="noopener">
+                <div class="fw-semibold" x-text="a.headline"></div>
+                <div class="small text-secondary" x-text="a.description"></div>
+                <div class="small text-secondary mt-1" x-text="$fmt.ago(a.published)"></div>
+              </a></div>
+            </template>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </template>
+</div>
+{% endblock %}

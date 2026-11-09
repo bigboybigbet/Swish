@@ -9,6 +9,8 @@
    "about": "Today's games with win probabilities, spreads, totals and value spots."},
   {"key": "game",     "href": "/game",     "label": "Game",     "icon": "vs",
    "about": "One matchup in depth: win probability, why the model says so, score ranges and injuries."},
+  {"key": "news",     "href": "/news",     "label": "News",     "icon": "news",
+   "about": "NBA news tagged by team, with injuries, rest and suspensions flagged."},
   {"key": "ratings",  "href": "/ratings",  "label": "Ratings",  "icon": "trophy",
    "about": "Team power ratings with injury-adjusted strength, plus player ratings."},
   {"key": "accuracy", "href": "/accuracy", "label": "Accuracy", "icon": "target",
@@ -26,7 +28,24 @@
 {%- endmacro %}
 
 {#- Tabler page header; optional actions via {% call page_header(...) %}…{% endcall %} -#}
-{% macro page_header(title, pretitle="Swish") -%}
+{% macro page_header(title, pretitle="Swish", image=None, sub=None) -%}
+{%- if image %}
+{#- Photo band: a real arena picture (credited in the footer) under a flat navy scrim. -#}
+<section class="page-band d-print-none"
+         style="--band-sm: url('/static/img/bg/{{ image }}-960.jpg'); --band-lg: url('/static/img/bg/{{ image }}-1920.jpg')">
+  <div class="container-xl">
+    <div class="row g-2 align-items-end">
+      <div class="col">
+        <h1 class="page-band-title">{{ title }}</h1>
+        {%- if sub %}<p class="page-band-sub">{{ sub }}</p>{% endif %}
+      </div>
+      {%- if caller is defined %}
+      <div class="col-auto ms-auto">{{ caller() }}</div>
+      {%- endif %}
+    </div>
+  </div>
+</section>
+{%- else %}
 <div class="page-header d-print-none">
   <div class="container-xl">
     <div class="row g-2 align-items-center">
@@ -40,6 +59,7 @@
     </div>
   </div>
 </div>
+{%- endif %}
 {%- endmacro %}
 
 {#- Tabler .empty; optional action buttons via call block. -#}
@@ -117,7 +137,8 @@
 {% macro team_badge(team_expr, size="") -%}
 <img class="team-logo {{ size }}" alt="" loading="lazy" decoding="async"
      x-show="$teamLogo({{ team_expr }})" :src="$teamLogo({{ team_expr }}) || ''"
-     :title="({{ team_expr }})?.name || ''" @error="$store.logos.fail({{ team_expr }})">
+     :title="({{ team_expr }})?.name || ''" @error="$store.logos.fail({{ team_expr }})"
+     x-init="setTimeout(() => { if (!$el.naturalWidth) $store.logos.fail({{ team_expr }}) }, 4000)">
 <span class="team-badge {{ size }}" x-show="!$teamLogo({{ team_expr }})" :style="$teamStyle({{ team_expr }})"
       x-text="({{ team_expr }})?.abbr || ''" :title="({{ team_expr }})?.name || ''"></span>
 {%- endmacro %}

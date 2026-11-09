@@ -41,7 +41,7 @@ def test_nav_matches_routes(client):
     for page, href in PAGES.items():
         assert f'href="{href}"' in html
     labels = re.findall(r'<span class="nav-link-title">([^<]+)</span>', html)
-    assert labels == ["Slate", "Game", "Ratings", "Accuracy", "Bets", "Model", "Settings"]
+    assert labels == ["Slate", "Game", "News", "Ratings", "Accuracy", "Bets", "Model", "Settings"]
 
 
 @pytest.mark.parametrize("page,href", PAGES.items())

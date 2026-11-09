@@ -37,7 +37,7 @@
 </style>
 {% endblock %}
 
-{% block page_header %}{{ page_header("Game", "Matchup analysis") }}{% endblock %}
+{% block page_header %}{{ page_header("Matchup analysis", image="arena-court", sub="One game in depth: the win probability, why the model says so, injuries and the latest team news.") }}{% endblock %}
 
 {% block content %}
 <div x-data="gamePage">
@@ -557,6 +557,40 @@
         <button type="button" class="btn btn-outline-secondary" @click="seedCustom()">Reset to live report</button>
         <button type="button" class="btn btn-primary ms-auto" data-bs-dismiss="offcanvas" @click="analyze()">Apply and analyze</button>
       </div>
+    </div>
+  </div>
+
+  {#- team news for the two teams: what changes who plays comes first -#}
+  <div class="card mt-3" x-show="homeId && awayId"
+       x-data="{ items: null, key: '',
+                 async load(h, a) {
+                   const k = h + '-' + a; if (!h || !a || k === this.key) return; this.key = k; this.items = null;
+                   try {
+                     const get = (id) => fetch('/api/news?limit=8&team_id=' + id).then((r) => r.ok ? r.json() : { articles: [] });
+                     const [x, y] = await Promise.all([get(a), get(h)]);
+                     const seen = new Set();
+                     this.items = [...x.articles, ...y.articles].filter((n) => !seen.has(n.id) && seen.add(n.id))
+                       .sort((p, q) => (q.availability - p.availability) || (q.published || '').localeCompare(p.published || '')).slice(0, 8);
+                   } catch { this.items = []; }
+                 } }"
+       x-effect="load(homeId, awayId)">
+    <div class="card-header"><h3 class="card-title">Team news</h3>
+      <span class="card-subtitle ms-2 small text-secondary">Injuries, rest and roster moves for both teams, newest first.</span>
+      <a class="ms-auto small" :href="'/news?team_id=' + homeId">More news</a></div>
+    <div class="list-group list-group-flush">
+      <template x-if="items === null"><div class="list-group-item text-secondary">Loading news…</div></template>
+      <template x-if="items && !items.length"><div class="list-group-item text-secondary">No recent news for these teams.</div></template>
+      <template x-for="n in items || []" :key="n.id">
+        <a class="list-group-item list-group-item-action" :href="n.url" target="_blank" rel="noopener">
+          <div class="d-flex align-items-center gap-2 small mb-1">
+            <span class="badge bg-red text-red-fg" x-show="n.availability">Affects who plays</span>
+            <template x-for="t in n.teams" :key="t.id"><span class="badge bg-secondary-lt" x-text="t.abbr"></span></template>
+            <span class="ms-auto text-secondary" x-text="$fmt.ago(n.published)"></span>
+          </div>
+          <div class="fw-semibold" x-text="n.headline"></div>
+          <div class="small text-secondary" x-text="n.description"></div>
+        </a>
+      </template>
     </div>
   </div>
 </div>
